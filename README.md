@@ -48,6 +48,7 @@ LLAMA_API_KEY=your-llama-api-key
 6. Run the application:
 ```bash
 uvicorn main:app --reload
+uvicorn main:app --reload --host 0.0.0.0 --port 5000
 uvicorn llama_recommender:app --reload --host 0.0.0.0 --port 5000
 ```
 

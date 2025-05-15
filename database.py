@@ -40,4 +40,5 @@ class Database:
 # Collections
 USERS_COLLECTION = "users"
 JOBS_COLLECTION = "jobs"
-RECOMMENDATIONS_COLLECTION = "recommendations" 
+RECOMMENDATIONS_COLLECTION = "recommendations"
+CANDIDATES_COLLECTION = "candidates" 

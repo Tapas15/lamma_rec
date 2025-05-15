@@ -1,5 +1,5 @@
 import asyncio
-from database import Database, USERS_COLLECTION, JOBS_COLLECTION, RECOMMENDATIONS_COLLECTION
+from database import Database, USERS_COLLECTION, JOBS_COLLECTION, RECOMMENDATIONS_COLLECTION, CANDIDATES_COLLECTION
 
 async def init_database():
     try:
@@ -40,6 +40,15 @@ async def init_database():
             await db[RECOMMENDATIONS_COLLECTION].create_index("user_id")
             await db[RECOMMENDATIONS_COLLECTION].create_index("job_id")
             print("Created indexes on user_id and job_id fields in recommendations collection")
+
+        if CANDIDATES_COLLECTION not in collections:
+            await db.create_collection(CANDIDATES_COLLECTION)
+            print(f"Created collection: {CANDIDATES_COLLECTION}")
+            
+            # Create indexes for candidates collection
+            await db[CANDIDATES_COLLECTION].create_index("email", unique=True)
+            await db[CANDIDATES_COLLECTION].create_index("skills")
+            print("Created indexes on email and skills fields in candidates collection")
 
         print("Database initialization completed successfully!")
         

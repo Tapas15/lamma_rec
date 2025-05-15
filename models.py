@@ -12,10 +12,11 @@ class UserBase(BaseModel):
     user_type: UserType
     full_name: str
 
-class UserCreate(UserBase):
-    password: str
-
 class User(UserBase):
+    id: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+class Candidate(UserBase):
     id: str
     created_at: datetime = Field(default_factory=datetime.utcnow)
     skills: List[str] = []
@@ -23,6 +24,17 @@ class User(UserBase):
     education: Optional[str] = None
     location: Optional[str] = None
     bio: Optional[str] = None
+
+class CandidateCreate(UserBase):
+    password: str
+    skills: List[str] = []
+    experience: Optional[str] = None
+    education: Optional[str] = None
+    location: Optional[str] = None
+    bio: Optional[str] = None
+
+class EmployerCreate(UserBase):
+    password: str
 
 class JobBase(BaseModel):
     title: str

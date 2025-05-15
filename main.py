@@ -3,13 +3,13 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
-from typing import List, Optional
+from typing import List, Optional, Union
 import os
 from dotenv import load_dotenv
 from bson import ObjectId
 
 from models import *
-from database import Database, USERS_COLLECTION, JOBS_COLLECTION, RECOMMENDATIONS_COLLECTION
+from database import Database, USERS_COLLECTION, JOBS_COLLECTION, RECOMMENDATIONS_COLLECTION, CANDIDATES_COLLECTION
 from llama_recommender import LlamaRecommender
 
 load_dotenv()
@@ -70,15 +70,39 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
 
 # Authentication endpoints
 @app.post("/register", response_model=User)
-async def register(user: UserCreate):
-    if await Database.get_collection(USERS_COLLECTION).find_one({"email": user.email}):
+async def register_user(user: Union[CandidateCreate, EmployerCreate]):
+    # Check if user already exists
+    existing_user = await Database.get_collection(USERS_COLLECTION).find_one({"email": user.email})
+    if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
     
+    # Create user document
     user_dict = user.dict()
-    user_dict["password"] = get_password_hash(user.password)
     user_dict["id"] = str(ObjectId())
+    user_dict["created_at"] = datetime.utcnow()
+    user_dict["password"] = pwd_context.hash(user.password)
     
+    # Insert into users collection
     await Database.get_collection(USERS_COLLECTION).insert_one(user_dict)
+    
+    # If user is a candidate, create candidate profile
+    if user.user_type == UserType.CANDIDATE:
+        candidate_dict = {
+            "id": user_dict["id"],
+            "email": user.email,
+            "user_type": user.user_type,
+            "full_name": user.full_name,
+            "created_at": datetime.utcnow(),
+            "skills": user_dict["skills"],  # Directly use the skills from the input
+            "experience": user_dict.get("experience"),
+            "education": user_dict.get("education"),
+            "location": user_dict.get("location"),
+            "bio": user_dict.get("bio")
+        }
+        await Database.get_collection(CANDIDATES_COLLECTION).insert_one(candidate_dict)
+    
+    # Remove password from response
+    del user_dict["password"]
     return user_dict
 
 @app.post("/token", response_model=Token)
@@ -117,90 +141,96 @@ async def get_job_recommendations(current_user: dict = Depends(get_current_user)
     if current_user["user_type"] != UserType.CANDIDATE:
         raise HTTPException(status_code=403, detail="Only candidates can get job recommendations")
     
+    # Get candidate profile
+    candidate = await Database.get_collection(CANDIDATES_COLLECTION).find_one(
+        {"email": current_user["email"]}
+    )
+    if not candidate:
+        raise HTTPException(status_code=404, detail="Candidate profile not found")
+    
     jobs = await Database.get_collection(JOBS_COLLECTION).find({"is_active": True}).to_list(length=None)
-    recommendations = recommender.get_candidate_job_matches(current_user, jobs)
+    recommendations = recommender.get_candidate_job_matches(candidate, jobs)
     return recommendations
 
 @app.get("/recommendations/candidates/{job_id}", response_model=List[dict])
 async def get_candidate_recommendations(job_id: str, current_user: dict = Depends(get_current_user)):
-    try:
-        if current_user["user_type"] != UserType.EMPLOYER:
-            raise HTTPException(status_code=403, detail="Only employers can get candidate recommendations")
-        
-        print(f"Fetching job with ID: {job_id}")
-        try:
-            job = await Database.get_collection(JOBS_COLLECTION).find_one({"id": job_id})
-            if not job:
-                raise HTTPException(status_code=404, detail="Job not found")
-            print(f"Found job: {job}")
-        except Exception as e:
-            print(f"Error finding job: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Error finding job: {str(e)}")
-        
-        print("Fetching candidates...")
-        try:
-            candidates = await Database.get_collection(USERS_COLLECTION).find(
-                {"user_type": UserType.CANDIDATE}
-            ).to_list(length=None)
-            # Convert _id to string for all candidates
-            for c in candidates:
-                c["id"] = str(c["_id"])
-            print(f"Found {len(candidates)} candidates")
-        except Exception as e:
-            print(f"Error fetching candidates: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Error fetching candidates: {str(e)}")
-        
-        if not candidates:
-            return []
-        
-        print("Getting job-candidate matches...")
-        try:
-            recommendations = recommender.get_job_candidate_matches(job, candidates)
-            print(f"Generated {len(recommendations)} recommendations")
-        except Exception as e:
-            print(f"Error generating recommendations: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Error generating recommendations: {str(e)}")
-        
-        # Fetch full candidate details for each recommendation
-        detailed_recommendations = []
-        for rec in recommendations:
-            try:
-                print(f"rec['candidate_id']: {rec['candidate_id']}, candidate ids: {[c['id'] for c in candidates]}")
-                candidate = next((c for c in candidates if c["id"] == rec["candidate_id"]), None)
-                if candidate:
-                    rec_with_details = rec.copy()
-                    # Remove sensitive information
-                    if "password" in candidate:
-                        del candidate["password"]
-                    rec_with_details["candidate"] = candidate
-                    detailed_recommendations.append(rec_with_details)
-            except Exception as e:
-                print(f"Error processing recommendation: {str(e)}")
-                continue
-        
-        print(f"Returning {len(detailed_recommendations)} detailed recommendations")
-        return detailed_recommendations
-    except Exception as e:
-        print(f"Error in get_candidate_recommendations: {str(e)}")
-        import traceback
-        print(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(e))
+    if current_user["user_type"] != UserType.EMPLOYER:
+        raise HTTPException(status_code=403, detail="Only employers can get candidate recommendations")
+    
+    job = await Database.get_collection(JOBS_COLLECTION).find_one({"id": job_id})
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    candidates = await Database.get_collection(CANDIDATES_COLLECTION).find().to_list(length=None)
+    if not candidates:
+        return []
+    
+    recommendations = recommender.get_job_candidate_matches(job, candidates)
+    
+    # Fetch full candidate details for each recommendation
+    detailed_recommendations = []
+    for rec in recommendations:
+        candidate = next((c for c in candidates if c["id"] == rec["candidate_id"]), None)
+        if candidate:
+            rec_with_details = rec.copy()
+            rec_with_details["candidate"] = candidate
+            detailed_recommendations.append(rec_with_details)
+    
+    return detailed_recommendations
 
 # User profile endpoints
 @app.put("/profile", response_model=User)
 async def update_profile(profile_data: dict, current_user: dict = Depends(get_current_user)):
-    await Database.get_collection(USERS_COLLECTION).update_one(
-        {"email": current_user["email"]},
-        {"$set": profile_data}
-    )
-    updated_user = await Database.get_collection(USERS_COLLECTION).find_one(
-        {"email": current_user["email"]}
-    )
-    return updated_user
+    if current_user["user_type"] == UserType.CANDIDATE:
+        # Update candidate profile
+        await Database.get_collection(CANDIDATES_COLLECTION).update_one(
+            {"email": current_user["email"]},
+            {"$set": profile_data}
+        )
+        # Get updated candidate profile
+        updated_profile = await Database.get_collection(CANDIDATES_COLLECTION).find_one(
+            {"email": current_user["email"]}
+        )
+        return updated_profile
+    else:
+        # Update employer profile
+        await Database.get_collection(USERS_COLLECTION).update_one(
+            {"email": current_user["email"]},
+            {"$set": profile_data}
+        )
+        # Get updated user profile
+        updated_profile = await Database.get_collection(USERS_COLLECTION).find_one(
+            {"email": current_user["email"]}
+        )
+        return updated_profile
 
 @app.get("/profile", response_model=User)
 async def get_profile(current_user: dict = Depends(get_current_user)):
     return current_user
+
+@app.delete("/profile", response_model=dict)
+async def delete_user(current_user: dict = Depends(get_current_user)):
+    try:
+        # Delete from users collection
+        user_result = await Database.get_collection(USERS_COLLECTION).delete_one(
+            {"email": current_user["email"]}
+        )
+        
+        if user_result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # If user is a candidate, also delete from candidates collection
+        if current_user["user_type"] == UserType.CANDIDATE:
+            candidate_result = await Database.get_collection(CANDIDATES_COLLECTION).delete_one(
+                {"email": current_user["email"]}
+            )
+            if candidate_result.deleted_count == 0:
+                print(f"Warning: Candidate profile not found for user {current_user['email']}")
+        
+        return {"message": "User and associated profiles deleted successfully"}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn
