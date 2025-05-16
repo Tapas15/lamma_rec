@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, Response
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -25,6 +25,12 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 30
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
+# Add this after the token-related imports
+BLACKLISTED_TOKENS = set()
+
+# Add this after the collections constants
+EMPLOYERS_COLLECTION = "employers"
+
 # Database connection
 @app.on_event("startup")
 async def startup_db_client():
@@ -48,6 +54,7 @@ def create_access_token(data: dict):
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
+# Update the get_current_user function to check for blacklisted tokens
 async def get_current_user(token: str = Depends(oauth2_scheme)):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -55,6 +62,14 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
+        # Check if token is blacklisted
+        if token in BLACKLISTED_TOKENS:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token has been invalidated",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+            
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         email: str = payload.get("sub")
         if email is None:
@@ -76,9 +91,12 @@ async def register_user(user: Union[CandidateCreate, EmployerCreate]):
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
     
+    # Generate a single ID for tracking across collections
+    user_id = str(ObjectId())
+    
     # Create user document
     user_dict = user.dict()
-    user_dict["id"] = str(ObjectId())
+    user_dict["id"] = user_id
     user_dict["created_at"] = datetime.utcnow()
     user_dict["password"] = pwd_context.hash(user.password)
     
@@ -88,18 +106,38 @@ async def register_user(user: Union[CandidateCreate, EmployerCreate]):
     # If user is a candidate, create candidate profile
     if user.user_type == UserType.CANDIDATE:
         candidate_dict = {
-            "id": user_dict["id"],
+            "id": user_id,
             "email": user.email,
             "user_type": user.user_type,
             "full_name": user.full_name,
             "created_at": datetime.utcnow(),
-            "skills": user_dict["skills"],  # Directly use the skills from the input
+            "skills": user_dict.get("skills", []),
             "experience": user_dict.get("experience"),
             "education": user_dict.get("education"),
             "location": user_dict.get("location"),
             "bio": user_dict.get("bio")
         }
         await Database.get_collection(CANDIDATES_COLLECTION).insert_one(candidate_dict)
+    
+    # If user is an employer, create employer profile
+    if user.user_type == UserType.EMPLOYER:
+        employer_dict = {
+            "id": user_id,  # Use the same ID for tracking
+            "email": user.email,
+            "user_type": user.user_type,
+            "full_name": user.full_name,
+            "created_at": datetime.utcnow(),
+            "company_name": user_dict.get("company_name"),
+            "company_description": user_dict.get("company_description"),
+            "company_website": user_dict.get("company_website"),
+            "company_location": user_dict.get("company_location"),
+            "company_size": user_dict.get("company_size"),
+            "industry": user_dict.get("industry"),
+            "contact_email": user_dict.get("contact_email"),
+            "contact_phone": user_dict.get("contact_phone")
+        }
+        # Store in EMPLOYERS_COLLECTION
+        await Database.get_collection(EMPLOYERS_COLLECTION).insert_one(employer_dict)
     
     # Remove password from response
     del user_dict["password"]
@@ -231,6 +269,76 @@ async def delete_user(current_user: dict = Depends(get_current_user)):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/logout")
+async def logout(token: str = Depends(oauth2_scheme)):
+    try:
+        # Add token to blacklist
+        BLACKLISTED_TOKENS.add(token)
+        return {"message": "Successfully logged out"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/employer/profile", response_model=Employer)
+async def get_employer_profile(current_user: dict = Depends(get_current_user)):
+    if current_user["user_type"] != UserType.EMPLOYER:
+        raise HTTPException(
+            status_code=403,
+            detail="Only employers can access this endpoint"
+        )
+    
+    # Get employer profile from EMPLOYERS_COLLECTION
+    employer = await Database.get_collection(EMPLOYERS_COLLECTION).find_one(
+        {"id": current_user["id"]}  # Use ID for consistent tracking
+    )
+    
+    if not employer:
+        raise HTTPException(status_code=404, detail="Employer profile not found")
+    
+    # Get jobs posted by this employer
+    jobs = await Database.get_collection(JOBS_COLLECTION).find(
+        {"employer_id": employer["id"]}  # Use the same ID for job tracking
+    ).to_list(length=None)
+    
+    # Add jobs to employer profile
+    employer["posted_jobs"] = jobs
+    
+    return employer
+
+@app.put("/employer/profile", response_model=Employer)
+async def update_employer_profile(
+    profile_data: dict,
+    current_user: dict = Depends(get_current_user)
+):
+    if current_user["user_type"] != UserType.EMPLOYER:
+        raise HTTPException(
+            status_code=403,
+            detail="Only employers can update employer profiles"
+        )
+    
+    # Update employer profile in EMPLOYERS_COLLECTION
+    update_result = await Database.get_collection(EMPLOYERS_COLLECTION).update_one(
+        {"id": current_user["id"]},  # Use ID for consistent tracking
+        {"$set": profile_data}
+    )
+    
+    if update_result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Employer profile not found")
+    
+    # Get updated profile from EMPLOYERS_COLLECTION
+    updated_profile = await Database.get_collection(EMPLOYERS_COLLECTION).find_one(
+        {"id": current_user["id"]}  # Use ID for consistent tracking
+    )
+    
+    # Get posted jobs
+    jobs = await Database.get_collection(JOBS_COLLECTION).find(
+        {"employer_id": updated_profile["id"]}  # Use the same ID for job tracking
+    ).to_list(length=None)
+    
+    # Add jobs to profile
+    updated_profile["posted_jobs"] = jobs
+    
+    return updated_profile
 
 if __name__ == "__main__":
     import uvicorn

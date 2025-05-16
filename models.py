@@ -35,6 +35,26 @@ class CandidateCreate(UserBase):
 
 class EmployerCreate(UserBase):
     password: str
+    company_name: str
+    company_description: Optional[str] = None
+    company_website: Optional[str] = None
+    company_location: Optional[str] = None
+    company_size: Optional[str] = None
+    industry: Optional[str] = None
+    contact_email: Optional[str] = None
+    contact_phone: Optional[str] = None
+
+class Employer(UserBase):
+    id: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    company_name: str
+    company_description: Optional[str] = None
+    company_website: Optional[str] = None
+    company_location: Optional[str] = None
+    company_size: Optional[str] = None
+    industry: Optional[str] = None
+    contact_email: Optional[str] = None
+    contact_phone: Optional[str] = None
 
 class JobBase(BaseModel):
     title: str

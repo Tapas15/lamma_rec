@@ -10,10 +10,18 @@ def register_employer():
         "email": "employer@techcompany.com",
         "password": "employerpass123",
         "user_type": "employer",
-        "full_name": "Tech Company HR",
-        "company_name": "Tech Solutions Inc",
+        "full_name": "Updated Tech Company",
+        "company_name": "Tech Solutions Inc.",
+        "company_description": "Leading technology solutions provider",
+        "company_website": "https://techsolutions.com",
+        "company_location": "San Francisco, CA",
+        "company_size": "100-500",
+        "industry": "Technology",
+        "contact_email": "hr@techsolutions.com",
+        "contact_phone": "+1-555-0123",
         "location": "San Francisco",
         "bio": "Leading technology company looking for talented professionals"
+        
     }
     
     try:
