@@ -1,10 +1,11 @@
 import requests
 import json
 
-def test_employer_profile():
+def test_employer_jobs_count():
     # API endpoints
     login_url = "http://localhost:8000/token"
     employer_profile_url = "http://localhost:8000/employer/profile"
+    jobs_url = "http://localhost:8000/jobs"
     
     # Login credentials
     login_data = {
@@ -42,34 +43,35 @@ def test_employer_profile():
             print(f"Company: {profile_data.get('company_name')}")
             print(f"Location: {profile_data.get('location')}")
             print(f"Industry: {profile_data.get('industry')}")
-            print(f"Company Size: {profile_data.get('company_size')}")
-            print(f"Company Website: {profile_data.get('company_website')}")
-            print(f"Contact Email: {profile_data.get('contact_email')}")
-            print(f"Contact Phone: {profile_data.get('contact_phone')}")
             print("="*50)
             
-            # Print posted jobs
-            posted_jobs = profile_data.get('posted_jobs', [])
-            print(f"\nPOSTED JOBS ({len(posted_jobs)})")
-            print("="*50)
+            # Step 3: Get all jobs from jobs collection
+            print("\nStep 3: Getting jobs from jobs collection...")
+            jobs_response = requests.get(jobs_url, headers=headers)
             
-            if not posted_jobs:
-                print("No jobs posted yet.")
+            if jobs_response.status_code == 200:
+                all_jobs = jobs_response.json()
+                employer_jobs = [job for job in all_jobs if job.get('employer_id') == profile_data.get('id')]
+                
+                print("\n" + "="*50)
+                print("JOBS STATISTICS")
+                print("="*50)
+                print(f"Total jobs posted: {len(employer_jobs)}")
+                
+                if employer_jobs:
+                    print("\nJob List:")
+                    print("-"*30)
+                    for i, job in enumerate(employer_jobs, 1):
+                        print(f"\nJob #{i}")
+                        print(f"Title: {job.get('title')}")
+                        print(f"Status: {'Active' if job.get('is_active') else 'Inactive'}")
+                        print(f"Posted on: {job.get('created_at', 'N/A')}")
+                        print("-"*30)
+                else:
+                    print("\nNo jobs found in jobs collection.")
             else:
-                for i, job in enumerate(posted_jobs, 1):
-                    print(f"\nJob #{i}")
-                    print("-"*30)
-                    print(f"Title: {job.get('title')}")
-                    print(f"Company: {job.get('company')}")
-                    print(f"Location: {job.get('location')}")
-                    print(f"Status: {'Active' if job.get('is_active') else 'Inactive'}")
-                    print(f"Salary Range: {job.get('salary_range')}")
-                    print("\nRequirements:")
-                    for req in job.get('requirements', []):
-                        print(f"- {req}")
-                    print("\nDescription:")
-                    print(job.get('description', 'No description provided'))
-                    print("-"*30)
+                print(f"Error getting jobs: {jobs_response.status_code}")
+                print("Response:", jobs_response.text)
         else:
             print(f"Error getting employer profile: {profile_response.status_code}")
             print("Response:", profile_response.text)
@@ -78,4 +80,4 @@ def test_employer_profile():
         print(f"Error: {str(e)}")
 
 if __name__ == "__main__":
-    test_employer_profile() 
+    test_employer_jobs_count() 

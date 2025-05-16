@@ -31,9 +31,16 @@ def test_employer_jobs():
                 
             employer_id = profile_response.json()["id"]
             
+            # Step 2: Get existing jobs to check for duplicates
+            print("\nStep 2: Checking existing jobs...")
+            get_jobs_response = requests.get(jobs_url, headers=headers)
+            existing_jobs = []
+            if get_jobs_response.status_code == 200:
+                existing_jobs = get_jobs_response.json()
+            
             # Job data for posting
             job_data = {
-                "title": "Senior Python Developer",
+                "title": "Senior Django Developer",
                 "company": "Tech Solutions Inc.",
                 "description": "We are looking for an experienced Python developer to join our team.",
                 "requirements": [
@@ -47,8 +54,15 @@ def test_employer_jobs():
                 "employer_id": employer_id
             }
             
-            # Step 2: Post a new job
-            print("\nStep 2: Posting a new job...")
+            # Check if job with same title already exists
+            job_exists = any(job["title"] == job_data["title"] for job in existing_jobs)
+            if job_exists:
+                print(f"\nError: A job with title '{job_data['title']}' already exists.")
+                print("Please modify the job title or delete the existing job first.")
+                return
+            
+            # Step 3: Post a new job
+            print("\nStep 3: Posting a new job...")
             post_response = requests.post(jobs_url, headers=headers, json=job_data)
             
             if post_response.status_code == 200:
