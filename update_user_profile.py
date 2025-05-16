@@ -7,20 +7,40 @@ def update_user_profile():
     
     # Get token first
     login_url = "http://localhost:8000/token"
+    # login_data = {
+    #     "username": "test@employer.com",  # Replace with your email
+    #     "password": "testpassword123"    # Replace with your password
+    # }
+
     login_data = {
-        "username": "test@example.com",  # Replace with your email
-        "password": "testpassword123"    # Replace with your password
+        "username": "candidate@example.com",  # Replace with your email
+        "password": "candidatepass123"    # Replace with your password
     }
     
     # Update data
     update_data = {
-        "full_name": "Updated Test User",
+        "full_name": "Updated Test User ",
         "skills": ["Python", "FastAPI", "MongoDB", "Docker", "AWS"],  # Updated skills
         "experience": "5 years of software development with focus on backend systems",
         "education": "Master's in Computer Science",
         "location": "San Francisco",
         "bio": "Senior software developer with expertise in cloud technologies and microservices"
     }
+
+    # update_data = {
+    #     "full_name": "Updated Test User five ",
+    #     "company_name": "Updated Tech Solutions Inc.",
+    #     "company_description": "Leading technology solutions provider",
+    #     "company_website": "https://techsolutions.com",
+    #     "company_location": "San Francisco, CA",
+    #     "company_size": "100-500",
+    #     "industry": "Technology",
+    #     "contact_email": "hr@techsolutions.com",
+    #     "contact_phone": "+1-555-0123",
+    #     "location": "San Francisco",
+    #     "bio": "HR Manager at Tech Solutions Inc. with expertise in tech recruitment"   
+    
+    # }
     
     try:
         # Get token

@@ -242,11 +242,19 @@ async def get_candidate_recommendations(job_id: str, current_user: dict = Depend
 @app.put("/profile", response_model=User)
 async def update_profile(profile_data: dict, current_user: dict = Depends(get_current_user)):
     if current_user["user_type"] == UserType.CANDIDATE:
+        # Update both user and candidate profiles
+        # Update user profile
+        await Database.get_collection(USERS_COLLECTION).update_one(
+            {"email": current_user["email"]},
+            {"$set": profile_data}
+        )
+        
         # Update candidate profile
         await Database.get_collection(CANDIDATES_COLLECTION).update_one(
             {"email": current_user["email"]},
             {"$set": profile_data}
         )
+        
         # Get updated candidate profile
         updated_profile = await Database.get_collection(CANDIDATES_COLLECTION).find_one(
             {"email": current_user["email"]}
