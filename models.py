@@ -26,6 +26,7 @@ class Candidate(UserBase):
     bio: Optional[str] = None
 
 class CandidateCreate(UserBase):
+    user_type: UserType = UserType.CANDIDATE
     password: str
     skills: List[str] = []
     experience: Optional[str] = None
@@ -33,16 +34,32 @@ class CandidateCreate(UserBase):
     location: Optional[str] = None
     bio: Optional[str] = None
 
-class EmployerCreate(UserBase):
-    password: str
-    company_name: str
-    company_description: Optional[str] = None
-    company_website: Optional[str] = None
-    company_location: Optional[str] = None
-    company_size: Optional[str] = None
-    industry: Optional[str] = None
-    contact_email: Optional[str] = None
-    contact_phone: Optional[str] = None
+# class Employer(UserBase):
+#     id: str
+#     created_at: datetime = Field(default_factory=datetime.utcnow)
+#     company_name: List[str] = []
+#     experience: Optional[str] = None
+#     education: Optional[str] = None
+#     location: Optional[str] = None
+#     bio: Optional[str] = None
+
+# class EmployerCreate(UserBase):
+#     user_type: UserType = UserType.EMPLOYER
+#     password: str
+#     company_name: str
+#     experience: Optional[str] = None
+#     education: Optional[str] = None
+#     location: Optional[str] = None
+#     bio: Optional[str] = None
+
+# class CandidateCreate(UserBase):
+#     user_type: UserType = UserType.CANDIDATE
+#     password: str
+
+# class EmployerCreate(UserBase):
+#     user_type: UserType = UserType.EMPLOYER
+#     password: str
+
 
 class Employer(UserBase):
     id: str
@@ -55,6 +72,22 @@ class Employer(UserBase):
     industry: Optional[str] = None
     contact_email: Optional[str] = None
     contact_phone: Optional[str] = None
+    location: Optional[str] = None
+    bio: Optional[str] = None
+
+class EmployerCreate(UserBase):
+    user_type: UserType = UserType.EMPLOYER
+    password: str
+    company_name: str
+    company_description: Optional[str] = None
+    company_website: Optional[str] = None
+    company_location: Optional[str] = None
+    company_size: Optional[str] = None
+    industry: Optional[str] = None
+    contact_email: Optional[str] = None
+    contact_phone: Optional[str] = None
+    location: Optional[str] = None
+    bio: Optional[str] = None
 
 class JobBase(BaseModel):
     title: str

@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from bson import ObjectId
 
 from models import *
-from database import Database, USERS_COLLECTION, JOBS_COLLECTION, RECOMMENDATIONS_COLLECTION, CANDIDATES_COLLECTION
+from database import Database, USERS_COLLECTION, JOBS_COLLECTION, RECOMMENDATIONS_COLLECTION, CANDIDATES_COLLECTION, EMPLOYERS_COLLECTION
 from llama_recommender import LlamaRecommender
 
 load_dotenv()
@@ -27,9 +27,6 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 # Add this after the token-related imports
 BLACKLISTED_TOKENS = set()
-
-# Add this after the collections constants
-EMPLOYERS_COLLECTION = "employers"
 
 # Database connection
 @app.on_event("startup")
@@ -83,61 +80,86 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         raise credentials_exception
     return user
 
-# Authentication endpoints
-@app.post("/register", response_model=User)
-async def register_user(user: Union[CandidateCreate, EmployerCreate]):
+from typing import Union
+from fastapi import HTTPException, APIRouter
+from datetime import datetime
+from bson import ObjectId
+from passlib.context import CryptContext
+
+@app.post("/register/candidate", response_model=User)
+async def register_candidate(user: CandidateCreate):
     # Check if user already exists
     existing_user = await Database.get_collection(USERS_COLLECTION).find_one({"email": user.email})
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
     
-    # Generate a single ID for tracking across collections
-    user_id = str(ObjectId())
-    
     # Create user document
     user_dict = user.dict()
-    user_dict["id"] = user_id
+    user_dict["id"] = str(ObjectId())
     user_dict["created_at"] = datetime.utcnow()
     user_dict["password"] = pwd_context.hash(user.password)
+    user_dict["user_type"] = "candidate"
     
     # Insert into users collection
     await Database.get_collection(USERS_COLLECTION).insert_one(user_dict)
     
-    # If user is a candidate, create candidate profile
-    if user.user_type == UserType.CANDIDATE:
-        candidate_dict = {
-            "id": user_id,
-            "email": user.email,
-            "user_type": user.user_type,
-            "full_name": user.full_name,
-            "created_at": datetime.utcnow(),
-            "skills": user_dict.get("skills", []),
-            "experience": user_dict.get("experience"),
-            "education": user_dict.get("education"),
-            "location": user_dict.get("location"),
-            "bio": user_dict.get("bio")
-        }
-        await Database.get_collection(CANDIDATES_COLLECTION).insert_one(candidate_dict)
+    # Create candidate profile
+    candidate_dict = {
+        "id": user_dict["id"],
+        "email": user.email,
+        "user_type": "candidate",
+        "full_name": user.full_name,
+        "created_at": datetime.utcnow(),
+        "skills": user_dict.get("skills", []),
+        "experience": user_dict.get("experience"),
+        "education": user_dict.get("education"),
+        "location": user_dict.get("location"),
+        "bio": user_dict.get("bio")
+    }
+    await Database.get_collection(CANDIDATES_COLLECTION).insert_one(candidate_dict)
     
-    # If user is an employer, create employer profile
-    if user.user_type == UserType.EMPLOYER:
-        employer_dict = {
-            "id": user_id,  # Use the same ID for tracking
-            "email": user.email,
-            "user_type": user.user_type,
-            "full_name": user.full_name,
-            "created_at": datetime.utcnow(),
-            "company_name": user_dict.get("company_name"),
-            "company_description": user_dict.get("company_description"),
-            "company_website": user_dict.get("company_website"),
-            "company_location": user_dict.get("company_location"),
-            "company_size": user_dict.get("company_size"),
-            "industry": user_dict.get("industry"),
-            "contact_email": user_dict.get("contact_email"),
-            "contact_phone": user_dict.get("contact_phone")
-        }
-        # Store in EMPLOYERS_COLLECTION
-        await Database.get_collection(EMPLOYERS_COLLECTION).insert_one(employer_dict)
+    # Remove password from response
+    del user_dict["password"]
+    return user_dict
+
+@app.post("/register/employer", response_model=User)
+async def register_employer(user: EmployerCreate):
+    # Check if user already exists
+    existing_user = await Database.get_collection(USERS_COLLECTION).find_one({"email": user.email})
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    # Create user document
+    user_dict = user.model_dump()  # Using model_dump instead of dict
+    user_dict["id"] = str(ObjectId())
+    user_dict["created_at"] = datetime.utcnow()
+    user_dict["password"] = pwd_context.hash(user.password)
+    user_dict["user_type"] = "employer"
+    
+    # Insert into users collection
+    await Database.get_collection(USERS_COLLECTION).insert_one(user_dict)
+    
+    # Create employer profile with all fields
+    employer_dict = {
+        "id": user_dict["id"],
+        "email": user.email,
+        "user_type": "employer",
+        "full_name": user.full_name,
+        "company_name": user.company_name,
+        "company_description": user.company_description,
+        "company_website": user.company_website,
+        "company_location": user.company_location,
+        "company_size": user.company_size,
+        "industry": user.industry,
+        "contact_email": user.contact_email,
+        "contact_phone": user.contact_phone,
+        "location": user.location,
+        "bio": user.bio,
+        "created_at": datetime.utcnow()
+    }
+    
+    # Insert into employers collection
+    await Database.get_collection(EMPLOYERS_COLLECTION).insert_one(employer_dict)
     
     # Remove password from response
     del user_dict["password"]
@@ -279,7 +301,7 @@ async def logout(token: str = Depends(oauth2_scheme)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/employer/profile", response_model=Employer)
+@app.get("/employer/profile", response_model=User)
 async def get_employer_profile(current_user: dict = Depends(get_current_user)):
     if current_user["user_type"] != UserType.EMPLOYER:
         raise HTTPException(
@@ -287,9 +309,9 @@ async def get_employer_profile(current_user: dict = Depends(get_current_user)):
             detail="Only employers can access this endpoint"
         )
     
-    # Get employer profile from EMPLOYERS_COLLECTION
-    employer = await Database.get_collection(EMPLOYERS_COLLECTION).find_one(
-        {"id": current_user["id"]}  # Use ID for consistent tracking
+    # Get employer profile with posted jobs
+    employer = await Database.get_collection(USERS_COLLECTION).find_one(
+        {"email": current_user["email"]}
     )
     
     if not employer:
@@ -297,48 +319,13 @@ async def get_employer_profile(current_user: dict = Depends(get_current_user)):
     
     # Get jobs posted by this employer
     jobs = await Database.get_collection(JOBS_COLLECTION).find(
-        {"employer_id": employer["id"]}  # Use the same ID for job tracking
+        {"employer_id": employer["id"]}
     ).to_list(length=None)
     
     # Add jobs to employer profile
     employer["posted_jobs"] = jobs
     
     return employer
-
-@app.put("/employer/profile", response_model=Employer)
-async def update_employer_profile(
-    profile_data: dict,
-    current_user: dict = Depends(get_current_user)
-):
-    if current_user["user_type"] != UserType.EMPLOYER:
-        raise HTTPException(
-            status_code=403,
-            detail="Only employers can update employer profiles"
-        )
-    
-    # Update employer profile in EMPLOYERS_COLLECTION
-    update_result = await Database.get_collection(EMPLOYERS_COLLECTION).update_one(
-        {"id": current_user["id"]},  # Use ID for consistent tracking
-        {"$set": profile_data}
-    )
-    
-    if update_result.modified_count == 0:
-        raise HTTPException(status_code=404, detail="Employer profile not found")
-    
-    # Get updated profile from EMPLOYERS_COLLECTION
-    updated_profile = await Database.get_collection(EMPLOYERS_COLLECTION).find_one(
-        {"id": current_user["id"]}  # Use ID for consistent tracking
-    )
-    
-    # Get posted jobs
-    jobs = await Database.get_collection(JOBS_COLLECTION).find(
-        {"employer_id": updated_profile["id"]}  # Use the same ID for job tracking
-    ).to_list(length=None)
-    
-    # Add jobs to profile
-    updated_profile["posted_jobs"] = jobs
-    
-    return updated_profile
 
 if __name__ == "__main__":
     import uvicorn

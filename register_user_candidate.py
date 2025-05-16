@@ -16,6 +16,7 @@ def register_user():
         "education": "Bachelor's in Computer Science",
         "location": "New York",
         "bio": "Passionate software developer looking for new opportunities",
+        "bios": "Passionate software developer looking for new opportunities"
     }
     
     try:
