@@ -261,13 +261,21 @@ async def update_profile(profile_data: dict, current_user: dict = Depends(get_cu
         )
         return updated_profile
     else:
-        # Update employer profile
+        # Update both user and employer profiles
+        # Update user profile
         await Database.get_collection(USERS_COLLECTION).update_one(
             {"email": current_user["email"]},
             {"$set": profile_data}
         )
-        # Get updated user profile
-        updated_profile = await Database.get_collection(USERS_COLLECTION).find_one(
+        
+        # Update employer profile
+        await Database.get_collection(EMPLOYERS_COLLECTION).update_one(
+            {"email": current_user["email"]},
+            {"$set": profile_data}
+        )
+        
+        # Get updated employer profile
+        updated_profile = await Database.get_collection(EMPLOYERS_COLLECTION).find_one(
             {"email": current_user["email"]}
         )
         return updated_profile
@@ -294,6 +302,22 @@ async def delete_user(current_user: dict = Depends(get_current_user)):
             )
             if candidate_result.deleted_count == 0:
                 print(f"Warning: Candidate profile not found for user {current_user['email']}")
+        
+        # If user is an employer, delete from employers collection and their posted jobs
+        elif current_user["user_type"] == UserType.EMPLOYER:
+            # Delete employer profile
+            employer_result = await Database.get_collection(EMPLOYERS_COLLECTION).delete_one(
+                {"email": current_user["email"]}
+            )
+            if employer_result.deleted_count == 0:
+                print(f"Warning: Employer profile not found for user {current_user['email']}")
+            
+            # Delete all jobs posted by this employer
+            jobs_result = await Database.get_collection(JOBS_COLLECTION).delete_many(
+                {"employer_id": current_user["id"]}
+            )
+            if jobs_result.deleted_count > 0:
+                print(f"Deleted {jobs_result.deleted_count} jobs posted by employer {current_user['email']}")
         
         return {"message": "User and associated profiles deleted successfully"}
         
@@ -337,4 +361,5 @@ async def get_employer_profile(current_user: dict = Depends(get_current_user)):
 
 if __name__ == "__main__":
     import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000) 
     uvicorn.run(app, host="0.0.0.0", port=8000) 

@@ -8,9 +8,14 @@ def delete_user():
     # Get token first
     login_url = "http://localhost:8000/token"
     login_data = {
-        "username": "test@example.com",  # Replace with your email
+        "username": "test@employer.com",  # Replace with your email
         "password": "testpassword123"    # Replace with your password
     }
+    #login_url = "http://localhost:8000/token"
+    # login_data = {
+    #     "username": "candidate@example.com",  # Replace with your email
+    #     "password": "candidatepass123"    # Replace with your password
+    # }
     
     try:
         # Get token
