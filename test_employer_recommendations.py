@@ -5,8 +5,8 @@ def test_employer_recommendations():
     # Employer login
     login_url = "http://localhost:8000/token"
     login_data = {
-        "username": "employer@techcompany.com",
-        "password": "employerpass123"
+        "username": "test@employer.com",
+        "password": "testpassword123"
     }
     
     try:

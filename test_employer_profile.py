@@ -25,30 +25,46 @@ def test_employer_profile():
         headers = {"Authorization": f"Bearer {token}"}
         print("Login successful!")
         
-        # Step 2: Get employer profile
-        print("\nStep 2: Getting employer profile...")
+        # Step 2: Get employer profile from employers collection
+        print("\nStep 2: Getting employer profile from employers collection...")
         profile_response = requests.get(employer_profile_url, headers=headers)
         
         if profile_response.status_code == 200:
             print("Employer profile retrieved successfully!")
             profile_data = profile_response.json()
             
-            # Print employer profile information
+            # Print employer profile information from employers collection
             print("\n" + "="*50)
-            print("EMPLOYER PROFILE")
+            print("EMPLOYER PROFILE (FROM EMPLOYERS COLLECTION)")
             print("="*50)
+            print("Basic Information:")
+            print("-"*30)
             print(f"Name: {profile_data.get('full_name')}")
             print(f"Email: {profile_data.get('email')}")
-            print(f"Company: {profile_data.get('company_name')}")
-            print(f"Location: {profile_data.get('location')}")
-            print(f"Industry: {profile_data.get('industry')}")
-            print(f"Company Size: {profile_data.get('company_size')}")
+            print(f"User Type: {profile_data.get('user_type')}")
+            print(f"Created At: {profile_data.get('created_at')}")
+            
+            print("\nCompany Information:")
+            print("-"*30)
+            print(f"Company Name: {profile_data.get('company_name')}")
+            print(f"Company Description: {profile_data.get('company_description')}")
             print(f"Company Website: {profile_data.get('company_website')}")
+            print(f"Company Location: {profile_data.get('company_location')}")
+            print(f"Company Size: {profile_data.get('company_size')}")
+            print(f"Industry: {profile_data.get('industry')}")
+            
+            print("\nContact Information:")
+            print("-"*30)
             print(f"Contact Email: {profile_data.get('contact_email')}")
             print(f"Contact Phone: {profile_data.get('contact_phone')}")
+            print(f"Location: {profile_data.get('location')}")
+            
+            print("\nAdditional Information:")
+            print("-"*30)
+            print(f"Bio: {profile_data.get('bio')}")
             print("="*50)
             
-            # Print posted jobs
+            # Print posted jobs if available
             posted_jobs = profile_data.get('posted_jobs', [])
             print(f"\nPOSTED JOBS ({len(posted_jobs)})")
             print("="*50)
