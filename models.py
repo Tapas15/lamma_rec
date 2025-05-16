@@ -34,31 +34,6 @@ class CandidateCreate(UserBase):
     location: Optional[str] = None
     bio: Optional[str] = None
 
-# class Employer(UserBase):
-#     id: str
-#     created_at: datetime = Field(default_factory=datetime.utcnow)
-#     company_name: List[str] = []
-#     experience: Optional[str] = None
-#     education: Optional[str] = None
-#     location: Optional[str] = None
-#     bio: Optional[str] = None
-
-# class EmployerCreate(UserBase):
-#     user_type: UserType = UserType.EMPLOYER
-#     password: str
-#     company_name: str
-#     experience: Optional[str] = None
-#     education: Optional[str] = None
-#     location: Optional[str] = None
-#     bio: Optional[str] = None
-
-# class CandidateCreate(UserBase):
-#     user_type: UserType = UserType.CANDIDATE
-#     password: str
-
-# class EmployerCreate(UserBase):
-#     user_type: UserType = UserType.EMPLOYER
-#     password: str
 
 
 class Employer(UserBase):

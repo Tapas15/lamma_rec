@@ -40,7 +40,7 @@ def test_employer_jobs():
             
             # Job data for posting
             job_data = {
-                "title": "Senior Django Developer",
+                "title": "Senior Python Developer",
                 "company": "Tech Solutions Inc.",
                 "description": "We are looking for an experienced Python developer to join our team.",
                 "requirements": [

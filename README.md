@@ -1,33 +1,50 @@
-# Job Recommender System
+# Lamma Rec - Job Portal API
 
-A personalized job recommendation system that matches candidates with jobs and vice versa using semantic matching and LLM-based explanations.
+A FastAPI-based job portal API that connects employers and candidates, featuring job posting, application management, and profile management.
 
 ## Features
 
-- User registration and authentication (candidates and employers)
-- Job posting and management
-- Semantic matching between jobs and candidates
-- Percentage match score with LLM-generated explanations
-- RESTful API endpoints for all operations
+### Employer Features
+- Register and manage employer profiles
+- Post and manage job listings
+- View and manage job applications
+- Update company information
+- Delete job postings
+- View posted jobs statistics
+
+### Candidate Features
+- Register and manage candidate profiles
+- Browse available jobs
+- Apply for jobs
+- Update skills and experience
+- View job recommendations
+- Track application status
+
+## Tech Stack
+
+- **Backend Framework**: FastAPI
+- **Database**: MongoDB
+- **Authentication**: JWT (JSON Web Tokens)
+- **Password Hashing**: Bcrypt
+- **API Testing**: Requests
 
 ## Prerequisites
 
 - Python 3.8+
 - MongoDB
-- Llama API key
+- pip (Python package manager)
 
-## Setup
+## Installation
 
 1. Clone the repository:
 ```bash
 git clone <repository-url>
-cd job-recommender
+cd Lamma_rec
 ```
 
-2. Create a virtual environment and activate it:
+2. Create a virtual environment:
 ```bash
-python3.10 -m venv venv 
-py -3.10 -m venv myenv
+python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 ```
 
@@ -37,86 +54,90 @@ pip install -r requirements.txt
 ```
 
 4. Create a `.env` file in the root directory with the following variables:
-```
+```env
 MONGODB_URL=mongodb://localhost:27017
+DATABASE_NAME=lamma_rec
 SECRET_KEY=your-secret-key
-LLAMA_API_KEY=your-llama-api-key
+ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=30
 ```
 
-5. Start MongoDB service on your machine
+## Running the Application
 
-6. Run the application:
+1. Start MongoDB service
+2. Run the FastAPI application:
 ```bash
 uvicorn main:app --reload
-uvicorn main:app --reload --host 0.0.0.0 --port 5000
-uvicorn llama_recommender:app --reload --host 0.0.0.0 --port 5000
 ```
 
 The API will be available at `http://localhost:8000`
 
 ## API Documentation
 
-Once the server is running, visit `http://localhost:8000/docs` for the interactive API documentation.
+Once the application is running, you can access:
+- Interactive API documentation: `http://localhost:8000/docs`
+- Alternative API documentation: `http://localhost:8000/redoc`
 
-### Key Endpoints
+## API Endpoints
 
-1. Authentication:
-   - POST `/register` - Register a new user (candidate or employer)
-   - POST `/token` - Login and get access token
+### Authentication
+- `POST /token` - Login and get access token
+- `POST /register/employer` - Register new employer
+- `POST /register/candidate` - Register new candidate
 
-2. Jobs:
-   - POST `/jobs` - Create a new job posting (employers only)
-   - GET `/jobs` - List all active jobs
+### Profile Management
+- `GET /profile` - Get user profile
+- `PUT /profile` - Update user profile
+- `DELETE /profile` - Delete user account
 
-3. Recommendations:
-   - GET `/recommendations/jobs` - Get job recommendations for candidates
-   - GET `/recommendations/candidates/{job_id}` - Get candidate recommendations for a job
+### Job Management
+- `POST /jobs` - Create new job posting
+- `GET /jobs` - List all active jobs
+- `DELETE /jobs/{job_id}` - Delete a job posting
 
-4. Profile:
-   - PUT `/profile` - Update user profile
+### Employer Specific
+- `GET /employer/profile` - Get employer profile with posted jobs
+- `GET /employer/applications` - Get job applications
 
-## Testing with Postman
+### Candidate Specific
+- `GET /candidate/profile` - Get candidate profile
+- `GET /recommendations/jobs` - Get job recommendations
 
-1. Register a new user:
-```http
-POST http://localhost:8000/register
-Content-Type: application/json
+## Project Structure
 
-{
-    "email": "user@example.com",
-    "password": "yourpassword",
-    "user_type": "candidate",
-    "full_name": "John Doe"
-}
+```
+Lamma_rec/
+├── main.py              # Main application file
+├── requirements.txt     # Project dependencies
+├── .env                # Environment variables
+└── README.md           # Project documentation
 ```
 
-2. Login to get access token:
-```http
-POST http://localhost:8000/token
-Content-Type: application/x-www-form-urlencoded
+## Security Features
 
-username=user@example.com&password=yourpassword
-```
+- JWT-based authentication
+- Password hashing with bcrypt
+- Token blacklisting for logout
+- Role-based access control
+- Input validation with Pydantic
 
-3. Use the access token in subsequent requests:
-```http
-GET http://localhost:8000/jobs
-Authorization: Bearer <your-access-token>
-```
+## Error Handling
 
-## Recommendation System
-
-The system uses:
-- Sentence Transformers for semantic matching
-- Llama 3.2 for generating match explanations
-- Cosine similarity for calculating match scores
-
-## Security
-
-- Passwords are hashed using bcrypt
-- JWT tokens for authentication
-- Role-based access control for endpoints
+The API implements comprehensive error handling for:
+- Authentication failures
+- Invalid input data
+- Database operations
+- Resource not found
+- Unauthorized access
 
 ## Contributing
 
-Feel free to submit issues and enhancement requests! 
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details. 

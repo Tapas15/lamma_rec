@@ -7,7 +7,7 @@ def test_user_login():
     
     # Login credentials
     login_data = {
-        "username": "test@example.com",
+        "username": "test@employer.com",
         "password": "testpassword123"
     }
     

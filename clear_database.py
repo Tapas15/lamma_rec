@@ -1,17 +1,68 @@
-from pymongo import MongoClient
+import asyncio
+from motor.motor_asyncio import AsyncIOMotorClient
+from dotenv import load_dotenv
+import os
 
-# Update this if your MongoDB URI or DB name is different
-MONGO_URI = "mongodb://localhost:27017"
-DB_NAME = "job_recommender"  # Change if your DB name is different
+# Load environment variables
+load_dotenv()
 
+# Database configuration
+MONGODB_URL = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
+DATABASE_NAME = os.getenv("DATABASE_NAME", "lamma_rec")
 
-def clear_collections():
-    client = MongoClient(MONGO_URI)
-    db = client[DB_NAME]
-    users_deleted = db["users"].delete_many({})
-    jobs_deleted = db["jobs"].delete_many({})
-    print(f"Deleted {users_deleted.deleted_count} users.")
-    print(f"Deleted {jobs_deleted.deleted_count} jobs.")
+async def clear_database():
+    try:
+        # Connect to MongoDB
+        print("Connecting to MongoDB...")
+        client = AsyncIOMotorClient(MONGODB_URL)
+        db = client[DATABASE_NAME]
+        
+        # Get all collection names
+        collections = await db.list_collection_names()
+        
+        if not collections:
+            print("Database is already empty.")
+            return
+        
+        print(f"\nFound {len(collections)} collections:")
+        for collection in collections:
+            print(f"- {collection}")
+        
+        # Drop each collection
+        for collection_name in collections:
+            try:
+                await db[collection_name].drop()
+                print(f"✓ Dropped collection: {collection_name}")
+            except Exception as e:
+                print(f"! Error dropping {collection_name}: {str(e)}")
+        
+        # Drop all indexes
+        try:
+            await db.command("dropAllIndexes")
+            print("\n✓ Dropped all indexes")
+        except Exception as e:
+            print(f"\n! Error dropping indexes: {str(e)}")
+        
+        print("\nDatabase cleanup completed!")
+        
+    except Exception as e:
+        print(f"Error connecting to database: {str(e)}")
+    finally:
+        # Close the connection
+        client.close()
+        print("Database connection closed.")
 
 if __name__ == "__main__":
-    clear_collections() 
+    # Confirm before clearing
+    print("="*60)
+    print("WARNING: This will COMPLETELY CLEAR the database!")
+    print("All collections and their data will be permanently deleted.")
+    print("="*60)
+    
+    confirm = input("\nType 'DELETE' to confirm database deletion: ")
+    
+    if confirm == "DELETE":
+        # Run the async function
+        asyncio.run(clear_database())
+    else:
+        print("Operation cancelled.") 
