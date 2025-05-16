@@ -8,8 +8,8 @@ def test_employer_profile():
     
         # Login credentials
     login_data = {
-        "username": "employer@techcompany.com",
-        "password": "employerpass123"
+        "username": "test@employer.com",  # Replace with your email
+        "password": "testpassword123"    # Replace with your password
     }
     
     try:

@@ -7,14 +7,14 @@ def get_user_profile():
     
     # Get token first
     login_url = "http://localhost:8000/token"
-    login_data = {
-        "username": "candidate@example.com",  # Replace with your email
-        "password": "candidatepass123"    # Replace with your password
-    }
     # login_data = {
-    #     "username": "test@employer.com",  # Replace with your email
-    #     "password": "testpassword123"    # Replace with your password
+    #     "username": "candidate@example.com",  # Replace with your email
+    #     "password": "candidatepass123"    # Replace with your password
     # }
+    login_data = {
+        "username": "test@employer.com",  # Replace with your email
+        "password": "testpassword123"    # Replace with your password
+    }
     try:
         # Get token
         login_response = requests.post(login_url, data=login_data)

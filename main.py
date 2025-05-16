@@ -10,7 +10,7 @@ from bson import ObjectId
 
 from models import *
 from database import Database, USERS_COLLECTION, JOBS_COLLECTION, RECOMMENDATIONS_COLLECTION, CANDIDATES_COLLECTION, EMPLOYERS_COLLECTION
-from llama_recommender import LlamaRecommender
+from lamma.llama_recommender import LlamaRecommender
 
 load_dotenv()
 
@@ -195,6 +195,43 @@ async def get_jobs(current_user: dict = Depends(get_current_user)):
     jobs = await Database.get_collection(JOBS_COLLECTION).find({"is_active": True}).to_list(length=None)
     return jobs
 
+@app.delete("/jobs/{job_id}")
+async def delete_job(
+    job_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    # Verify user is an employer
+    if current_user["user_type"] != UserType.EMPLOYER:
+        raise HTTPException(
+            status_code=403,
+            detail="Only employers can delete jobs"
+        )
+    
+    # Get the job
+    job = await Database.get_collection(JOBS_COLLECTION).find_one({"id": job_id})
+    if not job:
+        raise HTTPException(
+            status_code=404,
+            detail="Job not found"
+        )
+    
+    # Verify the job belongs to this employer
+    if str(job["employer_id"]) != str(current_user["id"]):
+        raise HTTPException(
+            status_code=403,
+            detail="You can only delete your own jobs"
+        )
+    
+    # Delete the job
+    result = await Database.get_collection(JOBS_COLLECTION).delete_one({"id": job_id})
+    if result.deleted_count == 0:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to delete job"
+        )
+    
+    return {"message": "Job deleted successfully"}
+
 # Recommendation endpoints
 @app.get("/recommendations/jobs", response_model=List[dict])
 async def get_job_recommendations(current_user: dict = Depends(get_current_user)):
@@ -324,9 +361,28 @@ async def delete_user(current_user: dict = Depends(get_current_user)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/logout")
-async def logout(token: str = Depends(oauth2_scheme)):
+@app.post("/logout/candidate")
+async def logout_candidate(token: str = Depends(oauth2_scheme), current_user: dict = Depends(get_current_user)):
     try:
+        if current_user["user_type"] != UserType.CANDIDATE:
+            raise HTTPException(
+                status_code=403,
+                detail="Only candidates can use this endpoint"
+            )
+        # Add token to blacklist
+        BLACKLISTED_TOKENS.add(token)
+        return {"message": "Candidate successfully logged out"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/logout/employer")
+async def logout_employer(token: str = Depends(oauth2_scheme), current_user: dict = Depends(get_current_user)):
+    try:
+        if current_user["user_type"] != UserType.EMPLOYER:
+            raise HTTPException(
+                status_code=403,
+                detail="Only employers can use this endpoint"
+            )
         # Add token to blacklist
         BLACKLISTED_TOKENS.add(token)
         return {"message": "Successfully logged out"}
@@ -362,4 +418,4 @@ async def get_employer_profile(current_user: dict = Depends(get_current_user)):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000) 
-    uvicorn.run(app, host="0.0.0.0", port=8000) 
+    #uvicorn.run(app, host="0.0.0.0", port=8000) 
