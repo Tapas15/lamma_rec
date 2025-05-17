@@ -23,7 +23,7 @@ def cleanup_test_account(email, password):
         headers = {"Authorization": f"Bearer {login_response.json()['access_token']}"}
         requests.delete(f"{BASE_URL}/profile", headers=headers)
 
-def test_employer_job_posting():
+def test_employer_project_posting():
     # Test account credentials - using fixed values
     test_email = "test@employer.com"
     test_password = "testpassword123"
@@ -83,58 +83,61 @@ def test_employer_job_posting():
     access_token = login_response.json()["access_token"]
     headers = {"Authorization": f"Bearer {access_token}"}
 
-    # Step 3: Post a new job
-    job_data = {
-        "title": "Senior Python Developer",
+    # Step 3: Post a new project
+    project_data = {
+        "title": "E-commerce Platform Development",
         "company": employer_data["company_name"],
-        "description": "Looking for an experienced Python developer with FastAPI expertise",
+        "description": "Develop a full-featured e-commerce platform with modern architecture",
         "requirements": [
-            "5+ years of Python experience",
-            "Experience with FastAPI and async programming",
+            "Experience with React/Next.js",
+            "Experience with Node.js",
             "Experience with MongoDB",
-            "Strong problem-solving skills"
+            "Good communication skills"
         ],
+        "budget_range": "$15000-$25000",
+        "duration": "4 months",
         "location": "Remote",
-        "salary_range": "$120,000 - $150,000",
-        "employer_id": employer_id,
-        "is_active": True
+        "project_type": "Web Development",
+        "skills_required": ["React", "Node.js", "MongoDB", "TypeScript"],
+        "deadline": (datetime.utcnow() + timedelta(days=90)).isoformat(),
+        "employer_id": employer_id
     }
 
-    post_job_response = requests.post(
-        f"{BASE_URL}/jobs",
-        json=job_data,
+    post_project_response = requests.post(
+        f"{BASE_URL}/projects",
+        json=project_data,
         headers=headers
     )
-    print("\n3. Post Job:")
-    print(f"Status: {post_job_response.status_code}")
-    print(f"Response: {json.dumps(post_job_response.json(), indent=2)}")
+    print("\n3. Post Project:")
+    print(f"Status: {post_project_response.status_code}")
+    print(f"Response: {json.dumps(post_project_response.json(), indent=2)}")
 
-    if post_job_response.status_code not in [200, 201]:
-        print("Failed to create job. Exiting test.")
+    if post_project_response.status_code not in [200, 201]:
+        print("Failed to create project. Exiting test.")
         return
 
-    # Step 4: Get employer's jobs
-    get_jobs_response = requests.get(
-        f"{BASE_URL}/jobs",
+    # Step 4: Get employer's projects
+    get_projects_response = requests.get(
+        f"{BASE_URL}/employer/projects",
         headers=headers
     )
-    print("\n4. Get Employer Jobs:")
-    print(f"Status: {get_jobs_response.status_code}")
-    print(f"Response: {json.dumps(get_jobs_response.json(), indent=2)}")
+    print("\n4. Get Employer Projects:")
+    print(f"Status: {get_projects_response.status_code}")
+    print(f"Response: {json.dumps(get_projects_response.json(), indent=2)}")
 
-    # Step 5: Update job status (if endpoint exists)
-    job_id = post_job_response.json()["id"]
+    # Step 5: Update project status
+    project_id = post_project_response.json()["id"]
     update_data = {
-        "is_active": False  # or any other status field that exists
+        "status": "in_progress"
     }
-    update_job_response = requests.patch(
-        f"{BASE_URL}/jobs/{job_id}",
+    update_project_response = requests.patch(
+        f"{BASE_URL}/projects/{project_id}",
         json=update_data,
         headers=headers
     )
-    print("\n5. Update Job Status:")
-    print(f"Status: {update_job_response.status_code}")
-    print(f"Response: {json.dumps(update_job_response.json(), indent=2)}")
+    print("\n5. Update Project Status:")
+    print(f"Status: {update_project_response.status_code}")
+    print(f"Response: {json.dumps(update_project_response.json(), indent=2)}")
 
 if __name__ == "__main__":
-    test_employer_job_posting() 
+    test_employer_project_posting() 

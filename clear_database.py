@@ -7,8 +7,11 @@ import os
 load_dotenv()
 
 # Database configuration
-MONGODB_URL = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
-DATABASE_NAME = os.getenv("DATABASE_NAME", "lamma_rec")
+
+# MongoDB connection string with proper formatting
+MONGODB_URL = "mongodb+srv://tapu199824:1234567890@cluster0.5q7vyy1.mongodb.net/?retryWrites=true&w=majority"
+DATABASE_NAME = "job_recommender"
+
 
 async def clear_database():
     try:

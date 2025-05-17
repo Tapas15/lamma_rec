@@ -34,8 +34,6 @@ class CandidateCreate(UserBase):
     location: Optional[str] = None
     bio: Optional[str] = None
 
-
-
 class Employer(UserBase):
     id: str
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -80,6 +78,28 @@ class Job(JobBase):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     employer_id: str
     is_active: bool = True
+
+class ProjectBase(BaseModel):
+    title: str
+    company: str
+    description: str
+    requirements: List[str]
+    budget_range: Optional[str] = None
+    duration: Optional[str] = None
+    location: Optional[str] = None
+    project_type: str
+    skills_required: List[str]
+    deadline: Optional[datetime] = None
+
+class ProjectCreate(ProjectBase):
+    employer_id: str
+
+class Project(ProjectBase):
+    id: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    employer_id: str
+    is_active: bool = True
+    status: str = "open"  # open, in_progress, completed, cancelled
 
 class Recommendation(BaseModel):
     id: str

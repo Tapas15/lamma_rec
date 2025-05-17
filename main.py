@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from bson import ObjectId
 
 from models import *
-from database import Database, USERS_COLLECTION, JOBS_COLLECTION, RECOMMENDATIONS_COLLECTION, CANDIDATES_COLLECTION, EMPLOYERS_COLLECTION
+from database import Database, USERS_COLLECTION, JOBS_COLLECTION, RECOMMENDATIONS_COLLECTION, CANDIDATES_COLLECTION, EMPLOYERS_COLLECTION, PROJECTS_COLLECTION
 from lamma.llama_recommender import LlamaRecommender
 
 load_dotenv()
@@ -232,6 +232,121 @@ async def delete_job(
     
     return {"message": "Job deleted successfully"}
 
+# Project endpoints
+@app.post("/projects", response_model=Project, status_code=status.HTTP_201_CREATED)
+async def create_project(project: ProjectCreate, current_user: dict = Depends(get_current_user)):
+    if current_user["user_type"] != UserType.EMPLOYER:
+        raise HTTPException(status_code=403, detail="Only employers can post projects")
+    
+    try:
+        # Convert project to dict and add required fields
+        project_dict = project.dict()
+        project_dict["id"] = str(ObjectId())
+        project_dict["created_at"] = datetime.utcnow()
+        project_dict["is_active"] = True
+        project_dict["status"] = "open"
+        project_dict["employer_id"] = current_user["id"]
+        
+        # Remove any None values to prevent null constraints
+        project_dict = {k: v for k, v in project_dict.items() if v is not None}
+        
+        # Insert the project
+        await Database.get_collection(PROJECTS_COLLECTION).insert_one(project_dict)
+        
+        # Fetch and return the created project
+        created_project = await Database.get_collection(PROJECTS_COLLECTION).find_one({"id": project_dict["id"]})
+        if not created_project:
+            raise HTTPException(status_code=500, detail="Failed to create project")
+            
+        return created_project
+        
+    except Exception as e:
+        print(f"Error creating project: {str(e)}")  # Log the error
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create project: {str(e)}"
+        )
+
+@app.get("/projects", response_model=List[Project])
+async def get_projects(status: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+    query = {"is_active": True}
+    if status:
+        query["status"] = status
+    
+    projects = await Database.get_collection("projects").find(query).to_list(length=None)
+    return projects
+
+@app.get("/employer/projects", response_model=List[Project])
+async def get_employer_projects(current_user: dict = Depends(get_current_user)):
+    if current_user["user_type"] != UserType.EMPLOYER:
+        raise HTTPException(status_code=403, detail="Only employers can view their projects")
+    
+    projects = await Database.get_collection("projects").find({
+        "employer_id": current_user["id"],
+        "is_active": True
+    }).to_list(length=None)
+    return projects
+
+@app.patch("/projects/{project_id}", response_model=Project)
+async def update_project_status(
+    project_id: str,
+    update_data: dict,
+    current_user: dict = Depends(get_current_user)
+):
+    if current_user["user_type"] != UserType.EMPLOYER:
+        raise HTTPException(status_code=403, detail="Only employers can update projects")
+    
+    # Get the project
+    project = await Database.get_collection("projects").find_one({"id": project_id})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    # Verify the project belongs to this employer
+    if project["employer_id"] != current_user["id"]:
+        raise HTTPException(status_code=403, detail="You can only update your own projects")
+    
+    # Validate status
+    valid_statuses = ["open", "in_progress", "completed", "cancelled"]
+    if "status" in update_data and update_data["status"] not in valid_statuses:
+        raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {', '.join(valid_statuses)}")
+    
+    # Update the project
+    result = await Database.get_collection("projects").update_one(
+        {"id": project_id},
+        {"$set": update_data}
+    )
+    
+    if result.modified_count == 0:
+        raise HTTPException(status_code=500, detail="Failed to update project")
+    
+    # Return updated project
+    updated_project = await Database.get_collection("projects").find_one({"id": project_id})
+    return updated_project
+
+@app.delete("/projects/{project_id}")
+async def delete_project(
+    project_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    if current_user["user_type"] != UserType.EMPLOYER:
+        raise HTTPException(status_code=403, detail="Only employers can delete projects")
+    
+    # Get the project
+    project = await Database.get_collection("projects").find_one({"id": project_id})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    # Verify the project belongs to this employer
+    if project["employer_id"] != current_user["id"]:
+        raise HTTPException(status_code=403, detail="You can only delete your own projects")
+    
+    # Delete the project
+    result = await Database.get_collection("projects").delete_one({"id": project_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=500, detail="Failed to delete project")
+    
+    return {"message": "Project deleted successfully"}
+
 # Recommendation endpoints
 @app.get("/recommendations/jobs", response_model=List[dict])
 async def get_job_recommendations(current_user: dict = Depends(get_current_user)):
@@ -340,7 +455,7 @@ async def delete_user(current_user: dict = Depends(get_current_user)):
             if candidate_result.deleted_count == 0:
                 print(f"Warning: Candidate profile not found for user {current_user['email']}")
         
-        # If user is an employer, delete from employers collection and their posted jobs
+        # If user is an employer, delete from employers collection and their posted jobs and projects
         elif current_user["user_type"] == UserType.EMPLOYER:
             # Delete employer profile
             employer_result = await Database.get_collection(EMPLOYERS_COLLECTION).delete_one(
@@ -355,6 +470,13 @@ async def delete_user(current_user: dict = Depends(get_current_user)):
             )
             if jobs_result.deleted_count > 0:
                 print(f"Deleted {jobs_result.deleted_count} jobs posted by employer {current_user['email']}")
+
+            # Delete all projects posted by this employer
+            projects_result = await Database.get_collection("projects").delete_many(
+                {"employer_id": current_user["id"]}
+            )
+            if projects_result.deleted_count > 0:
+                print(f"Deleted {projects_result.deleted_count} projects posted by employer {current_user['email']}")
         
         return {"message": "User and associated profiles deleted successfully"}
         

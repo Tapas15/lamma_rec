@@ -1,62 +1,52 @@
+from motor.motor_asyncio import AsyncIOMotorClient
 import asyncio
-from database import Database, USERS_COLLECTION, JOBS_COLLECTION, RECOMMENDATIONS_COLLECTION, CANDIDATES_COLLECTION
+from database import MONGODB_URL, DATABASE_NAME, USERS_COLLECTION, JOBS_COLLECTION, PROJECTS_COLLECTION, CANDIDATES_COLLECTION, EMPLOYERS_COLLECTION
 
 async def init_database():
+    print("Initializing database...")
+    client = AsyncIOMotorClient(MONGODB_URL)
+    db = client[DATABASE_NAME]
+    
     try:
-        # Connect to MongoDB
-        await Database.connect_db()
-        print("Connected to MongoDB successfully!")
+        # Drop existing indexes to clean up
+        print("\nDropping existing indexes...")
+        collections = [USERS_COLLECTION, JOBS_COLLECTION, PROJECTS_COLLECTION, CANDIDATES_COLLECTION, EMPLOYERS_COLLECTION]
+        for collection in collections:
+            try:
+                await db[collection].drop_indexes()
+                print(f"Dropped indexes for {collection}")
+            except Exception as e:
+                print(f"No indexes to drop for {collection}: {str(e)}")
 
-        # Get database instance
-        db = Database.get_db()
+        # Create proper indexes
+        print("\nCreating new indexes...")
         
-        # List all collections
-        collections = await db.list_collection_names()
-        print(f"Existing collections: {collections}")
-
-        # Create collections if they don't exist
-        if USERS_COLLECTION not in collections:
-            await db.create_collection(USERS_COLLECTION)
-            print(f"Created collection: {USERS_COLLECTION}")
-            
-            # Create indexes for users collection
-            await db[USERS_COLLECTION].create_index("email", unique=True)
-            print("Created unique index on email field in users collection")
-
-        if JOBS_COLLECTION not in collections:
-            await db.create_collection(JOBS_COLLECTION)
-            print(f"Created collection: {JOBS_COLLECTION}")
-            
-            # Create indexes for jobs collection
-            await db[JOBS_COLLECTION].create_index("title")
-            await db[JOBS_COLLECTION].create_index("company")
-            print("Created indexes on title and company fields in jobs collection")
-
-        if RECOMMENDATIONS_COLLECTION not in collections:
-            await db.create_collection(RECOMMENDATIONS_COLLECTION)
-            print(f"Created collection: {RECOMMENDATIONS_COLLECTION}")
-            
-            # Create indexes for recommendations collection
-            await db[RECOMMENDATIONS_COLLECTION].create_index("user_id")
-            await db[RECOMMENDATIONS_COLLECTION].create_index("job_id")
-            print("Created indexes on user_id and job_id fields in recommendations collection")
-
-        if CANDIDATES_COLLECTION not in collections:
-            await db.create_collection(CANDIDATES_COLLECTION)
-            print(f"Created collection: {CANDIDATES_COLLECTION}")
-            
-            # Create indexes for candidates collection
-            await db[CANDIDATES_COLLECTION].create_index("email", unique=True)
-            await db[CANDIDATES_COLLECTION].create_index("skills")
-            print("Created indexes on email and skills fields in candidates collection")
-
-        print("Database initialization completed successfully!")
+        # Users collection - email should be unique
+        await db[USERS_COLLECTION].create_index("email", unique=True)
+        print(f"Created unique index on email for {USERS_COLLECTION}")
+        
+        # Employers collection - email should be unique
+        await db[EMPLOYERS_COLLECTION].create_index("email", unique=True)
+        print(f"Created unique index on email for {EMPLOYERS_COLLECTION}")
+        
+        # Candidates collection - email should be unique
+        await db[CANDIDATES_COLLECTION].create_index("email", unique=True)
+        print(f"Created unique index on email for {CANDIDATES_COLLECTION}")
+        
+        # Jobs collection - no unique constraint needed
+        await db[JOBS_COLLECTION].create_index([("employer_id", 1), ("created_at", -1)])
+        print(f"Created index on employer_id and created_at for {JOBS_COLLECTION}")
+        
+        # Projects collection - no unique constraint needed
+        await db[PROJECTS_COLLECTION].create_index([("employer_id", 1), ("created_at", -1)])
+        print(f"Created index on employer_id and created_at for {PROJECTS_COLLECTION}")
+        
+        print("\nDatabase initialization completed successfully!")
         
     except Exception as e:
-        print(f"Error initializing database: {e}")
+        print(f"Error initializing database: {str(e)}")
     finally:
-        # Close the database connection
-        await Database.close_db()
+        client.close()
 
 if __name__ == "__main__":
     asyncio.run(init_database()) 
