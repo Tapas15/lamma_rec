@@ -114,6 +114,36 @@ class Project(ProjectBase):
     is_active: bool = True
     status: str = "open"  # open, in_progress, completed, cancelled
 
+class JobApplication(BaseModel):
+    id: str
+    candidate_id: str
+    job_id: str
+    employer_id: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    status: str = "applied"  # applied, reviewed, interview, rejected, accepted
+    cover_letter: Optional[str] = None
+    resume_url: Optional[str] = None
+    notes: Optional[str] = None
+    last_updated: datetime = Field(default_factory=datetime.utcnow)
+    
+class JobApplicationCreate(BaseModel):
+    job_id: str
+    cover_letter: Optional[str] = None
+    resume_url: Optional[str] = None
+    notes: Optional[str] = None
+
+class SavedJob(BaseModel):
+    id: str
+    candidate_id: str
+    job_id: str
+    employer_id: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    notes: Optional[str] = None
+    
+class SavedJobCreate(BaseModel):
+    job_id: str
+    notes: Optional[str] = None
+
 class Recommendation(BaseModel):
     id: str
     user_id: str

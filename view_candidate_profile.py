@@ -126,7 +126,39 @@ def view_candidate_profile():
             "saved_jobs_count": len(candidate_details.get("saved_jobs", []))
         })
         
-        # Step 4: Get job recommendations
+        # Step 4: Get job applications
+        print("\nFetching job applications...")
+        applications_response = requests.get(f"{BASE_URL}/applications", headers=headers)
+        
+        if applications_response.status_code == 200:
+            applications = applications_response.json()
+            if applications:
+                print_json(f"JOB APPLICATIONS ({len(applications)})", applications)
+            else:
+                print("\n=== JOB APPLICATIONS ===")
+                print("No job applications found.")
+                print("-" * 80)
+        else:
+            print(f"Error fetching job applications. Status: {applications_response.status_code}")
+            print_json("Application Error Response", applications_response.json() if applications_response.content else "No content")
+        
+        # Step 5: Get saved jobs
+        print("\nFetching saved jobs...")
+        saved_jobs_response = requests.get(f"{BASE_URL}/saved-jobs", headers=headers)
+        
+        if saved_jobs_response.status_code == 200:
+            saved_jobs = saved_jobs_response.json()
+            if saved_jobs:
+                print_json(f"SAVED JOBS ({len(saved_jobs)})", saved_jobs)
+            else:
+                print("\n=== SAVED JOBS ===")
+                print("No saved jobs found.")
+                print("-" * 80)
+        else:
+            print(f"Error fetching saved jobs. Status: {saved_jobs_response.status_code}")
+            print_json("Saved Jobs Error Response", saved_jobs_response.json() if saved_jobs_response.content else "No content")
+        
+        # Step 6: Get job recommendations
         print("\nFetching job recommendations...")
         recommendations_response = requests.get(f"{BASE_URL}/recommendations/jobs", headers=headers)
         
@@ -140,24 +172,6 @@ def view_candidate_profile():
                 print("-" * 80)
         else:
             print(f"Error fetching job recommendations. Status: {recommendations_response.status_code}")
-            
-        # Display job applications if available
-        job_applications = candidate_details.get("job_applications", [])
-        if job_applications:
-            print_json(f"JOB APPLICATIONS ({len(job_applications)})", job_applications)
-        else:
-            print("\n=== JOB APPLICATIONS ===")
-            print("No job applications found.")
-            print("-" * 80)
-            
-        # Display saved jobs if available
-        saved_jobs = candidate_details.get("saved_jobs", [])
-        if saved_jobs:
-            print_json(f"SAVED JOBS ({len(saved_jobs)})", saved_jobs)
-        else:
-            print("\n=== SAVED JOBS ===")
-            print("No saved jobs found.")
-            print("-" * 80)
             
     except requests.exceptions.ConnectionError:
         print(f"\nError: Could not connect to the server at {BASE_URL}. Make sure the FastAPI server is running.")

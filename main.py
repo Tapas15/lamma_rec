@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from bson import ObjectId
 
 from models import *
-from database import Database, USERS_COLLECTION, JOBS_COLLECTION, RECOMMENDATIONS_COLLECTION, CANDIDATES_COLLECTION, EMPLOYERS_COLLECTION, PROJECTS_COLLECTION
+from database import Database, USERS_COLLECTION, JOBS_COLLECTION, RECOMMENDATIONS_COLLECTION, CANDIDATES_COLLECTION, EMPLOYERS_COLLECTION, PROJECTS_COLLECTION, JOB_APPLICATIONS_COLLECTION, SAVED_JOBS_COLLECTION, init_db
 from lamma.llama_recommender import LlamaRecommender
 
 load_dotenv()
@@ -32,6 +32,8 @@ BLACKLISTED_TOKENS = set()
 @app.on_event("startup")
 async def startup_db_client():
     await Database.connect_db()
+    await init_db()
+    print("Database initialized and ready for use")
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
@@ -222,12 +224,12 @@ async def register_employer(user: EmployerCreate):
             "profile_completed": True,
             "is_active": True,
             "last_active": current_time,
-            "verified": False,
+            "verified": False,  # Default to False, can be verified later
             "total_jobs_posted": 0,
             "total_active_jobs": 0,
-            "account_type": "standard",
+            "account_type": "standard",  # Can be used for different subscription levels
             "profile_views": 0,
-            "rating": None,
+            "rating": None,  # Can be used for employer ratings
             "social_links": {
                 "linkedin": user.linkedin or "",
                 "twitter": user.twitter or "",
@@ -622,6 +624,202 @@ async def logout_employer(token: str = Depends(oauth2_scheme), current_user: dic
         return {"message": "Successfully logged out"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# Job application endpoints
+@app.post("/applications", response_model=JobApplication)
+async def apply_for_job(application: JobApplicationCreate, current_user: dict = Depends(get_current_user)):
+    try:
+        if current_user["user_type"] != UserType.CANDIDATE:
+            raise HTTPException(status_code=403, detail="Only candidates can apply for jobs")
+        
+        # Check if the job exists
+        job = await Database.get_collection(JOBS_COLLECTION).find_one({"id": application.job_id})
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        
+        # Check if the candidate has already applied for this job
+        existing_application = await Database.get_collection(JOB_APPLICATIONS_COLLECTION).find_one({
+            "candidate_id": current_user["id"],
+            "job_id": application.job_id
+        })
+        
+        if existing_application:
+            raise HTTPException(status_code=400, detail="You have already applied for this job")
+        
+        # Create a new application
+        application_dict = application.dict()
+        application_dict["id"] = str(ObjectId())
+        application_dict["candidate_id"] = current_user["id"]
+        application_dict["employer_id"] = job["employer_id"]
+        application_dict["created_at"] = datetime.utcnow()
+        application_dict["status"] = "applied"
+        application_dict["last_updated"] = datetime.utcnow()
+        
+        # Insert into job applications collection
+        await Database.get_collection(JOB_APPLICATIONS_COLLECTION).insert_one(application_dict)
+        
+        # Remove MongoDB's _id
+        application_dict.pop("_id", None)
+        
+        return application_dict
+    
+    except Exception as e:
+        print(f"Error in apply_for_job: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to apply for job")
+
+@app.get("/applications", response_model=List[JobApplication])
+async def get_job_applications(current_user: dict = Depends(get_current_user)):
+    try:
+        if current_user["user_type"] != UserType.CANDIDATE:
+            raise HTTPException(status_code=403, detail="Only candidates can view their job applications")
+        
+        # Get all applications for this candidate
+        applications = await Database.get_collection(JOB_APPLICATIONS_COLLECTION).find({
+            "candidate_id": current_user["id"]
+        }).to_list(length=None)
+        
+        # Get job details for each application
+        for application in applications:
+            application.pop("_id", None)
+            job = await Database.get_collection(JOBS_COLLECTION).find_one({"id": application["job_id"]})
+            if job:
+                application["job_details"] = {
+                    "title": job.get("title"),
+                    "company": job.get("company"),
+                    "location": job.get("location")
+                }
+        
+        return applications
+    
+    except Exception as e:
+        print(f"Error in get_job_applications: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get job applications")
+
+@app.delete("/applications/{application_id}")
+async def withdraw_application(application_id: str, current_user: dict = Depends(get_current_user)):
+    try:
+        if current_user["user_type"] != UserType.CANDIDATE:
+            raise HTTPException(status_code=403, detail="Only candidates can withdraw applications")
+        
+        # Check if the application exists and belongs to this candidate
+        application = await Database.get_collection(JOB_APPLICATIONS_COLLECTION).find_one({
+            "id": application_id,
+            "candidate_id": current_user["id"]
+        })
+        
+        if not application:
+            raise HTTPException(status_code=404, detail="Application not found or does not belong to you")
+        
+        # Delete the application
+        result = await Database.get_collection(JOB_APPLICATIONS_COLLECTION).delete_one({
+            "id": application_id
+        })
+        
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=500, detail="Failed to withdraw application")
+        
+        return {"message": "Application withdrawn successfully"}
+    
+    except Exception as e:
+        print(f"Error in withdraw_application: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to withdraw application")
+
+# Saved jobs endpoints
+@app.post("/saved-jobs", response_model=SavedJob)
+async def save_job(saved_job: SavedJobCreate, current_user: dict = Depends(get_current_user)):
+    try:
+        if current_user["user_type"] != UserType.CANDIDATE:
+            raise HTTPException(status_code=403, detail="Only candidates can save jobs")
+        
+        # Check if the job exists
+        job = await Database.get_collection(JOBS_COLLECTION).find_one({"id": saved_job.job_id})
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+    
+        # Check if the job is already saved
+        existing_saved_job = await Database.get_collection(SAVED_JOBS_COLLECTION).find_one({
+            "candidate_id": current_user["id"],
+            "job_id": saved_job.job_id
+        })
+        
+        if existing_saved_job:
+            raise HTTPException(status_code=400, detail="You have already saved this job")
+        
+        # Create a new saved job
+        saved_job_dict = saved_job.dict()
+        saved_job_dict["id"] = str(ObjectId())
+        saved_job_dict["candidate_id"] = current_user["id"]
+        saved_job_dict["employer_id"] = job["employer_id"]
+        saved_job_dict["created_at"] = datetime.utcnow()
+        
+        # Insert into saved jobs collection
+        await Database.get_collection(SAVED_JOBS_COLLECTION).insert_one(saved_job_dict)
+        
+        # Remove MongoDB's _id
+        saved_job_dict.pop("_id", None)
+        
+        return saved_job_dict
+    
+    except Exception as e:
+        print(f"Error in save_job: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to save job")
+
+@app.get("/saved-jobs", response_model=List[SavedJob])
+async def get_saved_jobs(current_user: dict = Depends(get_current_user)):
+    try:
+        if current_user["user_type"] != UserType.CANDIDATE:
+            raise HTTPException(status_code=403, detail="Only candidates can view their saved jobs")
+        
+        # Get all saved jobs for this candidate
+        saved_jobs = await Database.get_collection(SAVED_JOBS_COLLECTION).find({
+            "candidate_id": current_user["id"]
+        }).to_list(length=None)
+    
+        # Get job details for each saved job
+        for saved_job in saved_jobs:
+            saved_job.pop("_id", None)
+            job = await Database.get_collection(JOBS_COLLECTION).find_one({"id": saved_job["job_id"]})
+            if job:
+                saved_job["job_details"] = {
+                    "title": job.get("title"),
+                    "company": job.get("company"),
+                    "location": job.get("location")
+                }
+        
+        return saved_jobs
+    
+    except Exception as e:
+        print(f"Error in get_saved_jobs: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to get saved jobs")
+
+@app.delete("/saved-jobs/{saved_job_id}")
+async def remove_saved_job(saved_job_id: str, current_user: dict = Depends(get_current_user)):
+    try:
+        if current_user["user_type"] != UserType.CANDIDATE:
+            raise HTTPException(status_code=403, detail="Only candidates can remove saved jobs")
+        
+        # Check if the saved job exists and belongs to this candidate
+        saved_job = await Database.get_collection(SAVED_JOBS_COLLECTION).find_one({
+            "id": saved_job_id,
+            "candidate_id": current_user["id"]
+        })
+        
+        if not saved_job:
+            raise HTTPException(status_code=404, detail="Saved job not found or does not belong to you")
+        
+        # Delete the saved job
+        result = await Database.get_collection(SAVED_JOBS_COLLECTION).delete_one({
+            "id": saved_job_id
+        })
+        
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=500, detail="Failed to remove saved job")
+        
+        return {"message": "Saved job removed successfully"}
+    
+    except Exception as e:
+        print(f"Error in remove_saved_job: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to remove saved job")
 
 if __name__ == "__main__":
     import uvicorn
