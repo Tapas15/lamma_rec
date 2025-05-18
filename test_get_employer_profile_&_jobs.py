@@ -8,10 +8,10 @@ def test_employer_profile():
     
     # Login credentials
     login_data = {
-        "username": "test.projects@example.com",
-        "password": "testpass123"
+        "username": "test@employer.com",
+        "password": "testpassword123"
     }
-    
+  
     try:
         # Step 1: Login and get token
         print("Step 1: Logging in as employer...")

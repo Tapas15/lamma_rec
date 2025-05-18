@@ -1,140 +1,83 @@
 import requests
 import json
-from datetime import datetime, timedelta
 
-# Base URL for the API
-BASE_URL = "http://localhost:8000"
-
-def cleanup_test_account(email, password):
-    """Clean up the test account if it exists"""
-    # Login
-    login_data = {
-        "username": email,
-        "password": password
-    }
-    login_response = requests.post(
-        f"{BASE_URL}/token",
-        data=login_data,
-        headers={"Content-Type": "application/x-www-form-urlencoded"}
-    )
+def test_employer_jobs():
+    # API endpoints
+    login_url = "http://localhost:8000/token"
+    jobs_url = "http://localhost:8000/jobs"
     
-    if login_response.status_code == 200:
-        # If login successful, delete the account
-        headers = {"Authorization": f"Bearer {login_response.json()['access_token']}"}
-        requests.delete(f"{BASE_URL}/profile", headers=headers)
-
-def test_employer_job_posting():
-    # Test account credentials - using fixed values
-    test_email = "test@employer.com"
-    test_password = "testpassword123"
-    
-    # Test data for employer registration
-    employer_data = {
-        "email": test_email,
-        "password": test_password,
-        "full_name": "Project Manager",
-        "user_type": "employer",
-        "company_name": "Test Company",
-        "company_description": "A test company for project management",
-        "company_website": "https://testcompany.com",
-        "company_location": "Test City",
-        "company_size": "10-50",
-        "industry": "Technology",
-        "contact_email": test_email,
-        "contact_phone": "+1-555-0123",
-        "location": "Test City",
-        "bio": "Test account for project management"
-    }
-
-    # Step 1: Register employer
-    print("\n1. Registering employer...")
-    register_response = requests.post(
-        f"{BASE_URL}/register/employer",
-        json=employer_data
-    )
-    print(f"Status: {register_response.status_code}")
-    print(f"Response: {json.dumps(register_response.json(), indent=2)}")
-
-    if register_response.status_code != 200:
-        print("Failed to register employer. Exiting test.")
-        return
-
-    employer_id = register_response.json()["id"]
-
-    # Step 2: Login employer
-    print("\n2. Logging in employer...")
+    # Login credentials
     login_data = {
-        "username": test_email,
-        "password": test_password
+        "username": "test@employer.com",
+        "password": "testpassword123"
     }
-    login_response = requests.post(
-        f"{BASE_URL}/token",
-        data=login_data,
-        headers={"Content-Type": "application/x-www-form-urlencoded"}
-    )
-    print(f"Status: {login_response.status_code}")
-    print(f"Response: {json.dumps(login_response.json(), indent=2)}")
-
-    if login_response.status_code != 200:
-        print("Failed to login. Exiting test.")
-        return
-
-    # Get access token
-    access_token = login_response.json()["access_token"]
-    headers = {"Authorization": f"Bearer {access_token}"}
-
-    # Step 3: Post a new job
-    job_data = {
-        "title": "Senior Python Developer",
-        "company": employer_data["company_name"],
-        "description": "Looking for an experienced Python developer with FastAPI expertise",
-        "requirements": [
-            "5+ years of Python experience",
-            "Experience with FastAPI and async programming",
-            "Experience with MongoDB",
-            "Strong problem-solving skills"
-        ],
-        "location": "Remote",
-        "salary_range": "$120,000 - $150,000",
-        "employer_id": employer_id,
-        "is_active": True
-    }
-
-    post_job_response = requests.post(
-        f"{BASE_URL}/jobs",
-        json=job_data,
-        headers=headers
-    )
-    print("\n3. Post Job:")
-    print(f"Status: {post_job_response.status_code}")
-    print(f"Response: {json.dumps(post_job_response.json(), indent=2)}")
-
-    if post_job_response.status_code not in [200, 201]:
-        print("Failed to create job. Exiting test.")
-        return
-
-    # Step 4: Get employer's jobs
-    get_jobs_response = requests.get(
-        f"{BASE_URL}/jobs",
-        headers=headers
-    )
-    print("\n4. Get Employer Jobs:")
-    print(f"Status: {get_jobs_response.status_code}")
-    print(f"Response: {json.dumps(get_jobs_response.json(), indent=2)}")
-
-    # Step 5: Update job status (if endpoint exists)
-    job_id = post_job_response.json()["id"]
-    update_data = {
-        "is_active": False  # or any other status field that exists
-    }
-    update_job_response = requests.patch(
-        f"{BASE_URL}/jobs/{job_id}",
-        json=update_data,
-        headers=headers
-    )
-    print("\n5. Update Job Status:")
-    print(f"Status: {update_job_response.status_code}")
-    print(f"Response: {json.dumps(update_job_response.json(), indent=2)}")
+    
+    try:
+        # Step 1: Login to get token
+        print("Step 1: Logging in...")
+        login_response = requests.post(login_url, data=login_data)
+        
+        if login_response.status_code == 200:
+            print("Login successful!")
+            token = login_response.json()["access_token"]
+            headers = {"Authorization": f"Bearer {token}"}
+            
+            # Get employer profile to get employer_id
+            profile_url = "http://localhost:8000/profile"
+            profile_response = requests.get(profile_url, headers=headers)
+            if profile_response.status_code != 200:
+                print("Error getting employer profile")
+                return
+                
+            employer_id = profile_response.json()["id"]
+            
+            # Step 2: Get existing jobs to check for duplicates
+            print("\nStep 2: Checking existing jobs...")
+            get_jobs_response = requests.get(jobs_url, headers=headers)
+            existing_jobs = []
+            if get_jobs_response.status_code == 200:
+                existing_jobs = get_jobs_response.json()
+            
+            # Job data for posting
+            job_data = {
+                "title": "Senior Python Developer",
+                "company": "Tech Solutions Inc.",
+                "description": "We are looking for an experienced Python developer to join our team.",
+                "requirements": [
+                    "5+ years of Python experience",
+                    "Experience with FastAPI",
+                    "Knowledge of MongoDB",
+                    "Strong problem-solving skills"
+                ],
+                "location": "San Francisco, CA",
+                "salary_range": "$120,000 - $150,000",
+                "employer_id": employer_id
+            }
+            
+            # Check if job with same title already exists
+            job_exists = any(job["title"] == job_data["title"] for job in existing_jobs)
+            if job_exists:
+                print(f"\nError: A job with title '{job_data['title']}' already exists.")
+                print("Please modify the job title or delete the existing job first.")
+                return
+            
+            # Step 3: Post a new job
+            print("\nStep 3: Posting a new job...")
+            post_response = requests.post(jobs_url, headers=headers, json=job_data)
+            
+            if post_response.status_code == 200:
+                print("Job posted successfully!")
+                job = post_response.json()
+                print("Job details:", json.dumps(job, indent=2))
+            else:
+                print(f"Error posting job: {post_response.status_code}")
+                print("Response:", post_response.text)
+        else:
+            print(f"Error logging in: {login_response.status_code}")
+            print("Response:", login_response.text)
+            
+    except Exception as e:
+        print(f"Error: {str(e)}")
 
 if __name__ == "__main__":
-    test_employer_job_posting() 
+    test_employer_jobs() 

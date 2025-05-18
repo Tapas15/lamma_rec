@@ -86,84 +86,203 @@ from datetime import datetime
 from bson import ObjectId
 from passlib.context import CryptContext
 
-@app.post("/register/candidate", response_model=User)
+@app.post("/register/candidate", response_model=Candidate)
 async def register_candidate(user: CandidateCreate):
-    # Check if user already exists
-    existing_user = await Database.get_collection(USERS_COLLECTION).find_one({"email": user.email})
-    if existing_user:
-        raise HTTPException(status_code=400, detail="Email already registered")
-    
-    # Create user document
-    user_dict = user.dict()
-    user_dict["id"] = str(ObjectId())
-    user_dict["created_at"] = datetime.utcnow()
-    user_dict["password"] = pwd_context.hash(user.password)
-    user_dict["user_type"] = "candidate"
-    
-    # Insert into users collection
-    await Database.get_collection(USERS_COLLECTION).insert_one(user_dict)
-    
-    # Create candidate profile
-    candidate_dict = {
-        "id": user_dict["id"],
-        "email": user.email,
-        "user_type": "candidate",
-        "full_name": user.full_name,
-        "created_at": datetime.utcnow(),
-        "skills": user_dict.get("skills", []),
-        "experience": user_dict.get("experience"),
-        "education": user_dict.get("education"),
-        "location": user_dict.get("location"),
-        "bio": user_dict.get("bio")
-    }
-    await Database.get_collection(CANDIDATES_COLLECTION).insert_one(candidate_dict)
-    
-    # Remove password from response
-    del user_dict["password"]
-    return user_dict
+    try:
+        # Check if user already exists
+        existing_user = await Database.get_collection(USERS_COLLECTION).find_one({"email": user.email})
+        if existing_user:
+            raise HTTPException(status_code=400, detail="Email already registered")
+        
+        # Generate MongoDB ObjectId
+        object_id = ObjectId()
+        str_id = str(object_id)
+        current_time = datetime.utcnow()
+        
+        # Create user document
+        user_dict = {
+            "_id": object_id,
+            "id": str_id,
+            "email": user.email,
+            "password": pwd_context.hash(user.password),
+            "full_name": user.full_name,
+            "user_type": "candidate",
+            "created_at": current_time
+        }
+        
+        # Insert into users collection
+        await Database.get_collection(USERS_COLLECTION).insert_one(user_dict)
+        
+        # Create candidate profile with comprehensive fields
+        candidate_dict = {
+            "_id": object_id,
+            "id": str_id,
+            "email": user.email,
+            "user_type": "candidate",
+            "full_name": user.full_name,
+            "created_at": current_time,
+            "skills": user.skills or [],
+            "experience": user.experience or "No experience provided",
+            "education": user.education or "No education details provided",
+            "location": user.location or "Location not specified",
+            "bio": user.bio or "No bio provided",
+            # Add additional candidate-specific fields
+            "profile_completed": True,
+            "is_active": True,
+            "last_active": current_time,
+            "resume_url": None,
+            "profile_visibility": "public",
+            "job_preferences": {
+                "job_types": [],
+                "preferred_locations": [],
+                "salary_expectation": None,
+                "remote_work": True
+            },
+            "profile_views": 0,
+            "job_applications": [],
+            "saved_jobs": [],
+            "match_score_threshold": 70  # minimum match score for job recommendations
+        }
+        
+        # Insert into candidates collection
+        await Database.get_collection(CANDIDATES_COLLECTION).insert_one(candidate_dict)
+        
+        # Remove sensitive fields for response
+        candidate_dict.pop("_id", None)
+        
+        return candidate_dict
+        
+    except Exception as e:
+        print(f"Error in register_candidate: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to register candidate")
 
-@app.post("/register/employer", response_model=User)
+@app.get("/candidate/{candidate_id}", response_model=Candidate)
+async def get_candidate_profile(candidate_id: str):
+    try:
+        # Get candidate profile from candidates collection using id
+        candidate = await Database.get_collection(CANDIDATES_COLLECTION).find_one({"id": candidate_id})
+        if not candidate:
+            raise HTTPException(status_code=404, detail="Candidate profile not found")
+        
+        # Remove MongoDB's _id
+        candidate.pop("_id", None)
+        
+        return candidate
+        
+    except Exception as e:
+        print(f"Error in get_candidate_profile: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.post("/register/employer", response_model=Employer)
 async def register_employer(user: EmployerCreate):
-    # Check if user already exists
-    existing_user = await Database.get_collection(USERS_COLLECTION).find_one({"email": user.email})
-    if existing_user:
-        raise HTTPException(status_code=400, detail="Email already registered")
-    
-    # Create user document
-    user_dict = user.model_dump()  # Using model_dump instead of dict
-    user_dict["id"] = str(ObjectId())
-    user_dict["created_at"] = datetime.utcnow()
-    user_dict["password"] = pwd_context.hash(user.password)
-    user_dict["user_type"] = "employer"
-    
-    # Insert into users collection
-    await Database.get_collection(USERS_COLLECTION).insert_one(user_dict)
-    
-    # Create employer profile with all fields
-    employer_dict = {
-        "id": user_dict["id"],
-        "email": user.email,
-        "user_type": "employer",
-        "full_name": user.full_name,
-        "company_name": user.company_name,
-        "company_description": user.company_description,
-        "company_website": user.company_website,
-        "company_location": user.company_location,
-        "company_size": user.company_size,
-        "industry": user.industry,
-        "contact_email": user.contact_email,
-        "contact_phone": user.contact_phone,
-        "location": user.location,
-        "bio": user.bio,
-        "created_at": datetime.utcnow()
-    }
-    
-    # Insert into employers collection
-    await Database.get_collection(EMPLOYERS_COLLECTION).insert_one(employer_dict)
-    
-    # Remove password from response
-    del user_dict["password"]
-    return user_dict
+    try:
+        # Check if user already exists
+        existing_user = await Database.get_collection(USERS_COLLECTION).find_one({"email": user.email})
+        if existing_user:
+            raise HTTPException(status_code=400, detail="Email already registered")
+        
+        # Generate MongoDB ObjectId
+        object_id = ObjectId()
+        str_id = str(object_id)
+        current_time = datetime.utcnow()
+        
+        # Create user document
+        user_dict = {
+            "_id": object_id,
+            "id": str_id,
+            "email": user.email,
+            "password": pwd_context.hash(user.password),
+            "full_name": user.full_name,
+            "user_type": "employer",
+            "created_at": current_time
+        }
+        
+        # Insert into users collection
+        await Database.get_collection(USERS_COLLECTION).insert_one(user_dict)
+        
+        # Create employer profile with all fields
+        employer_dict = {
+            "_id": object_id,
+            "id": str_id,
+            "email": user.email,
+            "user_type": "employer",
+            "full_name": user.full_name,
+            "company_name": user.company_name,
+            "company_description": user.company_description or "Company description not provided",
+            "company_website": user.company_website or "Website not provided",
+            "company_location": user.company_location or "Location not specified",
+            "company_size": user.company_size or "Company size not specified",
+            "industry": user.industry or "Industry not specified",
+            "contact_email": user.contact_email or user.email,
+            "contact_phone": user.contact_phone or "Phone not provided",
+            "location": user.location or user.company_location or "Location not specified",
+            "bio": user.bio or "Bio not provided",
+            "created_at": current_time,
+            # Add additional employer-specific fields with default values
+            "profile_completed": True,
+            "is_active": True,
+            "last_active": current_time,
+            "verified": False,
+            "total_jobs_posted": 0,
+            "total_active_jobs": 0,
+            "account_type": "standard",
+            "profile_views": 0,
+            "rating": None,
+            "social_links": {
+                "linkedin": user.linkedin or "",
+                "twitter": user.twitter or "",
+                "website": user.company_website or ""
+            },
+            "posted_jobs": []
+        }
+        
+        # Insert into employers collection
+        await Database.get_collection(EMPLOYERS_COLLECTION).insert_one(employer_dict)
+        
+        # Remove sensitive fields for response
+        # Password is not in employer_dict, it's in user_dict which is not directly returned.
+        # _id is specific to MongoDB and usually not exposed directly if 'id' (string version) is used.
+        clean_employer_dict = employer_dict.copy()
+        clean_employer_dict.pop("_id", None) 
+        
+        return clean_employer_dict
+        
+    except Exception as e:
+        print(f"Error in register_employer: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to register employer")
+
+@app.get("/employer/{employer_id}", response_model=Employer)
+async def get_employer_profile(employer_id: str):
+    try:
+        employer = await Database.get_collection(EMPLOYERS_COLLECTION).find_one({"id": employer_id})
+        if not employer:
+            raise HTTPException(status_code=404, detail="Employer profile not found")
+        
+        # Get jobs posted by this employer
+        raw_jobs_from_db = await Database.get_collection(JOBS_COLLECTION).find(
+            {"employer_id": employer_id, "is_active": True}
+        ).to_list(length=None)
+        
+        # Process jobs to remove _id and ensure they are suitable for the response model
+        processed_jobs_list = []
+        for job_doc in raw_jobs_from_db:
+            job_doc.pop("_id", None)  # Remove MongoDB's _id from each job document
+            # Potentially, here you could also validate/convert job_doc fields if needed,
+            # e.g., ensuring datetime objects are handled as expected by Pydantic if not using a Job model for them.
+            processed_jobs_list.append(job_doc)
+            
+        employer["posted_jobs"] = processed_jobs_list
+
+        # Remove MongoDB's _id from the main employer document before returning
+        employer.pop("_id", None)
+        
+        return employer
+        
+    except Exception as e:
+        # Log the actual exception for debugging on the server
+        import traceback
+        print(f"Error in get_employer_profile for employer_id {employer_id}: {{str(e)}}\n{{traceback.format_exc()}}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.post("/token", response_model=Token)
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
@@ -455,7 +574,7 @@ async def delete_user(current_user: dict = Depends(get_current_user)):
             if candidate_result.deleted_count == 0:
                 print(f"Warning: Candidate profile not found for user {current_user['email']}")
         
-        # If user is an employer, delete from employers collection and their posted jobs and projects
+        # If user is an employer, delete from employers collection and their posted jobs
         elif current_user["user_type"] == UserType.EMPLOYER:
             # Delete employer profile
             employer_result = await Database.get_collection(EMPLOYERS_COLLECTION).delete_one(
@@ -470,13 +589,6 @@ async def delete_user(current_user: dict = Depends(get_current_user)):
             )
             if jobs_result.deleted_count > 0:
                 print(f"Deleted {jobs_result.deleted_count} jobs posted by employer {current_user['email']}")
-
-            # Delete all projects posted by this employer
-            projects_result = await Database.get_collection("projects").delete_many(
-                {"employer_id": current_user["id"]}
-            )
-            if projects_result.deleted_count > 0:
-                print(f"Deleted {projects_result.deleted_count} projects posted by employer {current_user['email']}")
         
         return {"message": "User and associated profiles deleted successfully"}
         
@@ -510,32 +622,6 @@ async def logout_employer(token: str = Depends(oauth2_scheme), current_user: dic
         return {"message": "Successfully logged out"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/employer/profile", response_model=User)
-async def get_employer_profile(current_user: dict = Depends(get_current_user)):
-    if current_user["user_type"] != UserType.EMPLOYER:
-        raise HTTPException(
-            status_code=403,
-            detail="Only employers can access this endpoint"
-        )
-    
-    # Get employer profile with posted jobs
-    employer = await Database.get_collection(USERS_COLLECTION).find_one(
-        {"email": current_user["email"]}
-    )
-    
-    if not employer:
-        raise HTTPException(status_code=404, detail="Employer profile not found")
-    
-    # Get jobs posted by this employer
-    jobs = await Database.get_collection(JOBS_COLLECTION).find(
-        {"employer_id": employer["id"]}
-    ).to_list(length=None)
-    
-    # Add jobs to employer profile
-    employer["posted_jobs"] = jobs
-    
-    return employer
 
 if __name__ == "__main__":
     import uvicorn

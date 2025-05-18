@@ -38,15 +38,26 @@ class Employer(UserBase):
     id: str
     created_at: datetime = Field(default_factory=datetime.utcnow)
     company_name: str
-    company_description: Optional[str] = None
-    company_website: Optional[str] = None
-    company_location: Optional[str] = None
-    company_size: Optional[str] = None
-    industry: Optional[str] = None
-    contact_email: Optional[str] = None
-    contact_phone: Optional[str] = None
-    location: Optional[str] = None
-    bio: Optional[str] = None
+    company_description: str
+    company_website: str
+    company_location: str
+    company_size: str
+    industry: str
+    contact_email: str
+    contact_phone: str
+    location: str
+    bio: str
+    profile_completed: bool = True
+    is_active: bool = True
+    last_active: datetime = Field(default_factory=datetime.utcnow)
+    verified: bool = False
+    total_jobs_posted: int = 0
+    total_active_jobs: int = 0
+    account_type: str = "standard"
+    profile_views: int = 0
+    rating: Optional[float] = None
+    social_links: dict = Field(default_factory=lambda: {"linkedin": "", "twitter": "", "website": ""})
+    posted_jobs: Optional[List[dict]] = []
 
 class EmployerCreate(UserBase):
     user_type: UserType = UserType.EMPLOYER
@@ -61,6 +72,8 @@ class EmployerCreate(UserBase):
     contact_phone: Optional[str] = None
     location: Optional[str] = None
     bio: Optional[str] = None
+    linkedin: Optional[str] = None
+    twitter: Optional[str] = None
 
 class JobBase(BaseModel):
     title: str

@@ -28,6 +28,10 @@ def test_employer_project_posting():
     test_email = "test@employer.com"
     test_password = "testpassword123"
     
+   
+    # Clean up any existing test account
+    cleanup_test_account(test_email, test_password)
+    
     # Test data for employer registration
     employer_data = {
         "email": test_email,
@@ -138,6 +142,14 @@ def test_employer_project_posting():
     print("\n5. Update Project Status:")
     print(f"Status: {update_project_response.status_code}")
     print(f"Response: {json.dumps(update_project_response.json(), indent=2)}")
+
+    # Clean up: Delete the test account
+    print("\n6. Cleaning up test account...")
+    cleanup_response = requests.delete(
+        f"{BASE_URL}/profile",
+        headers=headers
+    )
+    print(f"Cleanup Status: {cleanup_response.status_code}")
 
 if __name__ == "__main__":
     test_employer_project_posting() 

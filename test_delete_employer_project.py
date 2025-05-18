@@ -25,8 +25,9 @@ def cleanup_test_account(email, password):
 
 def test_delete_employer_project():
     # Test account credentials - using fixed values
-    test_email = "projectmanager@testcompany.com"
-    test_password = "test123456"
+    test_email = "test@employer.com"
+    test_password = "testpassword123"
+    
     
     # Clean up any existing test account
     cleanup_test_account(test_email, test_password)
