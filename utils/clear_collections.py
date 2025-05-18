@@ -16,11 +16,13 @@ DATABASE_NAME = "job_recommender"
 # Collection names
 COLLECTIONS = [
     "users",
-    "employers",
-    "candidates",
+    "saved_jobs",
+    "recommendations",
+    "projects",
     "jobs",
-    "applications",
-    "blacklisted_tokens"
+    "job_applications",
+    "candidates",
+    "employers",
 ]
 
 async def clear_collections():
