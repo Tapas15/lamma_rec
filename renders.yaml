@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: job-recommender-api
+    env: python
+    region: ohio  # Choose your preferred region
+    plan: starter  # Choose appropriate plan
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /docs  # FastAPI docs endpoint serves as a health check
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.0
+      - key: GROQ_API_KEY
+        sync: false  # This will prompt you to enter it in the Render dashboard
+      - key: GROQ_EMBEDDING_MODEL
+        value: llama3-embed-8b
+      - key: GROQ_API_BASE  
+        value: https://api.groq.com/v1
+      - key: SECRET_KEY
+        generateValue: true  # Automatically generates a random value
+      - key: MONGODB_URI
+        sync: false  # Add your MongoDB connection string in the Render dashboard
+      - key: DB_NAME
+        value: job_recommendation
+    autoDeploy: true
+    github:
+      deploy:
+        branch: main  # Change this to your main branch name (e.g., master, main)
+        enabled: true 
