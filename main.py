@@ -17,166 +17,232 @@ from database import Database, USERS_COLLECTION, JOBS_COLLECTION, RECOMMENDATION
 
 load_dotenv()
 
-# Define LlamaRecommender class to use embeddings for recommendations
-class LlamaRecommender:
-    def __init__(self, model_name: str = "llama3.2:latest"):
-        self.model_name = model_name
-        self.ollama_url = "http://localhost:11434/api/generate"
-        self.ollama_available = True
-        print(f"Using Ollama model: {model_name}")
+# Function to get embeddings from Ollama
+def get_embedding(text: str) -> List[float]:
+    """Get embedding from Ollama API"""
+    try:
+        response = requests.post(
+            'http://localhost:11434/api/embeddings',
+            json={
+                "model": "llama3.2:latest",
+                "prompt": text
+            }
+        )
+        data = response.json()
+        return data['embedding']
+    except Exception as e:
+        print(f"Error getting embedding: {e}")
+        # Return empty embedding in case of error
+        return []
 
-        try:
-            response = requests.get("http://localhost:11434/api/tags")
-            if response.status_code == 200:
-                models = response.json().get("models", [])
-                if not any(model["name"] == model_name for model in models):
-                    print(f"Warning: Model {model_name} not found. Available models: {[m['name'] for m in models]}")
-            else:
-                print("Warning: Could not verify available models")
-                self.ollama_available = False
-        except requests.exceptions.ConnectionError:
-            print("Error: Could not connect to Ollama. Will use fallback scoring mechanism.")
-            self.ollama_available = False
-    
-    def get_match_score(self, job_info: Dict, candidate_info: Dict) -> Tuple[float, str]:
-        """Calculate match score between a job and candidate using embeddings"""
-        try:
-            # Create job and candidate embeddings
-            job_text = f"{job_info.get('title', '')} {job_info.get('company', '')} {job_info.get('description', '')} {' '.join(job_info.get('requirements', []))}"
-            candidate_text = f"{candidate_info.get('full_name', '')} {' '.join(candidate_info.get('skills', []))} {candidate_info.get('experience', '')} {candidate_info.get('education', '')}"
-            
-            job_embedding = get_embedding(job_text)
-            candidate_embedding = get_embedding(candidate_text)
-            
-            if not job_embedding or not candidate_embedding:
-                return self._calculate_fallback_score(job_info, candidate_info)
-            
-            # Calculate cosine similarity
-            similarity = self._cosine_similarity(job_embedding, candidate_embedding)
-            
-            # Scale to 0-100 score
-            score = min(100, max(0, similarity * 100))
-            
-            # Generate explanation
-            required_skills = set(job_info.get("requirements", []))
-            if not required_skills:
-                required_skills = set(job_info.get("skills_required", []))
-                
-            candidate_skills = set(candidate_info.get("skills", []))
-            matched_skills = required_skills.intersection(candidate_skills)
-            
-            explanation = f"Semantic match score: {score:.1f}. "
-            if matched_skills:
-                explanation += f"Matching skills: {', '.join(matched_skills)}. "
-            if required_skills - matched_skills:
-                explanation += f"Missing skills: {', '.join(required_skills - matched_skills)}. "
-            
-            return score, explanation
-        except Exception as e:
-            print(f"Error in get_match_score: {str(e)}")
-            return self._calculate_fallback_score(job_info, candidate_info)
-    
-    def _cosine_similarity(self, vec1, vec2):
-        """Calculate cosine similarity between two vectors"""
-        if not vec1 or not vec2:
-            return 0.0
+def create_job_embedding(job_data: Dict[str, Any]) -> List[float]:
+    """Create a searchable text from job data and get its embedding"""
+    searchable_text = f"{job_data.get('title', '')} {job_data.get('company', '')} {job_data.get('description', '')} {' '.join(job_data.get('requirements', []))} {job_data.get('location', '')}"
+    return get_embedding(searchable_text)
+
+def create_project_embedding(project_data: Dict[str, Any]) -> List[float]:
+    """Create a searchable text from project data and get its embedding"""
+    searchable_text = f"{project_data.get('title', '')} {project_data.get('company', '')} {project_data.get('description', '')} {' '.join(project_data.get('requirements', []))} {' '.join(project_data.get('skills_required', []))} {project_data.get('project_type', '')} {project_data.get('location', '')}"
+    return get_embedding(searchable_text)
+
+def create_candidate_embedding(candidate_data: Dict[str, Any]) -> List[float]:
+    """Create a searchable text from candidate data and get its embedding"""
+    # Combine relevant candidate fields into a searchable text
+    skills_text = ' '.join(candidate_data.get('skills', []))
+    searchable_text = f"{candidate_data.get('full_name', '')} {skills_text} {candidate_data.get('experience', '')} {candidate_data.get('education', '')} {candidate_data.get('location', '')} {candidate_data.get('bio', '')}"
+    return get_embedding(searchable_text)
+
+# MongoDB Vector Search Recommender Functions
+async def get_match_score(job_info: Dict, candidate_info: Dict) -> Tuple[float, str]:
+    """Calculate match score between a job and candidate using MongoDB vector search"""
+    try:
+        # Create vectors for comparison
+        job_text = f"{job_info.get('title', '')} {job_info.get('company', '')} {job_info.get('description', '')} {' '.join(job_info.get('requirements', []))}"
+        candidate_text = f"{candidate_info.get('full_name', '')} {' '.join(candidate_info.get('skills', []))} {candidate_info.get('experience', '')} {candidate_info.get('education', '')}"
         
-        try:
-            vec1 = np.array(vec1)
-            vec2 = np.array(vec2)
-            
-            dot_product = np.dot(vec1, vec2)
-            norm_vec1 = np.linalg.norm(vec1)
-            norm_vec2 = np.linalg.norm(vec2)
-            
-            if norm_vec1 == 0 or norm_vec2 == 0:
-                return 0.0
-                
-            return dot_product / (norm_vec1 * norm_vec2)
-        except Exception as e:
-            print(f"Error in cosine similarity calculation: {str(e)}")
-            return 0.0
-    
-    def _calculate_fallback_score(self, job_info: Dict, candidate_info: Dict) -> Tuple[float, str]:
-        """Simple keyword matching algorithm as a fallback"""
-        job_requirements = set(job_info.get("requirements", []))
-        if not job_requirements and "required_skills" in job_info:
-            job_requirements = set(job_info.get("required_skills", []))
+        # Get embeddings
+        job_embedding = job_info.get('embedding') or get_embedding(job_text)
+        candidate_embedding = candidate_info.get('embedding') or get_embedding(candidate_text)
+        
+        if not job_embedding or not candidate_embedding:
+            return calculate_fallback_score(job_info, candidate_info)
+        
+        # Calculate cosine similarity manually since we're directly comparing two vectors
+        # In a full implementation with many candidates/jobs, we'd use MongoDB's $vectorSearch
+        score = cosine_similarity(job_embedding, candidate_embedding) * 100
+        
+        # Generate explanation
+        required_skills = set(job_info.get("requirements", []))
+        if not required_skills:
+            required_skills = set(job_info.get("skills_required", []))
             
         candidate_skills = set(candidate_info.get("skills", []))
+        matched_skills = required_skills.intersection(candidate_skills)
         
-        # Calculate skill match percentage
-        if not job_requirements:
-            skill_match = 50.0  # Default if no requirements specified
-        else:
-            matched_skills = job_requirements.intersection(candidate_skills)
-            skill_match = (len(matched_skills) / len(job_requirements)) * 100
-        
-        # Add location match bonus
-        location_match = 0
-        if job_info.get("location") == candidate_info.get("location"):
-            location_match = 10
-        
-        # Create explanation
-        explanation = f"Keyword match: Found {len(job_requirements.intersection(candidate_skills))} matching skills out of {len(job_requirements)} required skills."
-        
-        # Simple score calculation (primarily based on matching skills)
-        score = min(100, skill_match + location_match)
+        explanation = f"Match score: {score:.1f}. "
+        if matched_skills:
+            explanation += f"Matching skills: {', '.join(matched_skills)}. "
+        if required_skills - matched_skills:
+            explanation += f"Missing skills: {', '.join(required_skills - matched_skills)}. "
         
         return score, explanation
-        
-    def get_job_candidate_matches(self, job_info: Dict, candidates: List[Dict]) -> List[Dict]:
-        """Match a job to multiple candidates and return sorted candidate recommendations"""
-        try:
-            matches = []
-            for candidate in candidates:
-                try:
-                    candidate_id = candidate.get("id") if "id" in candidate else str(candidate.get("_id", "unknown"))
-                    score, explanation = self.get_match_score(job_info, candidate)
-                    matches.append({
-                        "candidate_id": candidate_id,
-                        "match_score": score,
-                        "explanation": explanation
-                    })
-                except Exception as e:
-                    print(f"Error matching candidate {candidate.get('id', 'unknown')}: {str(e)}")
-                    matches.append({
-                        "candidate_id": candidate.get("id", "unknown"),
-                        "match_score": 0.0,
-                        "explanation": f"Error occurred during matching: {str(e)}"
-                    })
-            return sorted(matches, key=lambda x: x["match_score"], reverse=True)
-        except Exception as e:
-            print(f"Unexpected error in get_job_candidate_matches: {str(e)}")
-            return []
+    except Exception as e:
+        print(f"Error in get_match_score: {str(e)}")
+        return calculate_fallback_score(job_info, candidate_info)
+
+def cosine_similarity(vec1, vec2):
+    """Calculate cosine similarity between two vectors"""
+    if not vec1 or not vec2:
+        return 0.0
     
-    def get_candidate_job_matches(self, candidate_info: Dict, jobs: List[Dict]) -> List[Dict]:
-        """Match a candidate to multiple jobs and return sorted job recommendations"""
-        try:
-            matches = []
-            for job in jobs:
-                try:
-                    job_id = job.get("id") if "id" in job else str(job.get("_id", "unknown"))
-                    score, explanation = self.get_match_score(job, candidate_info)
-                    matches.append({
-                        "job_id": job_id,
-                        "match_score": score,
-                        "explanation": explanation
-                    })
-                except Exception as e:
-                    print(f"Error matching job {job.get('id', 'unknown')}: {str(e)}")
-                    matches.append({
-                        "job_id": job.get("id", "unknown"),
-                        "match_score": 0.0,
-                        "explanation": f"Error occurred during matching: {str(e)}"
-                    })
-            return sorted(matches, key=lambda x: x["match_score"], reverse=True)
-        except Exception as e:
-            print(f"Unexpected error in get_candidate_job_matches: {str(e)}")
-            return []
+    try:
+        vec1 = np.array(vec1)
+        vec2 = np.array(vec2)
+        
+        dot_product = np.dot(vec1, vec2)
+        norm_vec1 = np.linalg.norm(vec1)
+        norm_vec2 = np.linalg.norm(vec2)
+        
+        if norm_vec1 == 0 or norm_vec2 == 0:
+            return 0.0
+            
+        return dot_product / (norm_vec1 * norm_vec2)
+    except Exception as e:
+        print(f"Error in cosine similarity calculation: {str(e)}")
+        return 0.0
+
+def calculate_fallback_score(job_info: Dict, candidate_info: Dict) -> Tuple[float, str]:
+    """Simple keyword matching algorithm as a fallback"""
+    job_requirements = set(job_info.get("requirements", []))
+    if not job_requirements and "required_skills" in job_info:
+        job_requirements = set(job_info.get("required_skills", []))
+        
+    candidate_skills = set(candidate_info.get("skills", []))
+    
+    # Calculate skill match percentage
+    if not job_requirements:
+        skill_match = 50.0  # Default if no requirements specified
+    else:
+        matched_skills = job_requirements.intersection(candidate_skills)
+        skill_match = (len(matched_skills) / max(1, len(job_requirements))) * 100
+    
+    # Add location match bonus
+    location_match = 0
+    if job_info.get("location") == candidate_info.get("location"):
+        location_match = 10
+    
+    # Create explanation
+    explanation = f"Keyword match: Found {len(job_requirements.intersection(candidate_skills))} matching skills out of {len(job_requirements)} required skills."
+    
+    # Simple score calculation (primarily based on matching skills)
+    score = min(100, skill_match + location_match)
+    
+    return score, explanation
+
+async def get_job_candidate_matches(job_info: Dict, candidates: List[Dict]) -> List[Dict]:
+    """Match a job to multiple candidates using vector similarity"""
+    try:
+        matches = []
+        for candidate in candidates:
+            try:
+                candidate_id = candidate.get("id") if "id" in candidate else str(candidate.get("_id", "unknown"))
+                score, explanation = await get_match_score(job_info, candidate)
+                matches.append({
+                    "candidate_id": candidate_id,
+                    "match_score": score,
+                    "explanation": explanation
+                })
+            except Exception as e:
+                print(f"Error matching candidate {candidate.get('id', 'unknown')}: {str(e)}")
+                matches.append({
+                    "candidate_id": candidate.get("id", "unknown"),
+                    "match_score": 0.0,
+                    "explanation": f"Error occurred during matching: {str(e)}"
+                })
+        return sorted(matches, key=lambda x: x["match_score"], reverse=True)
+    except Exception as e:
+        print(f"Unexpected error in get_job_candidate_matches: {str(e)}")
+        return []
+
+async def get_candidate_job_matches(candidate_info: Dict, jobs: List[Dict]) -> List[Dict]:
+    """Match a candidate to multiple jobs using vector similarity"""
+    try:
+        matches = []
+        for job in jobs:
+            try:
+                job_id = job.get("id") if "id" in job else str(job.get("_id", "unknown"))
+                score, explanation = await get_match_score(job, candidate_info)
+                matches.append({
+                    "job_id": job_id,
+                    "match_score": score,
+                    "explanation": explanation
+                })
+            except Exception as e:
+                print(f"Error matching job {job.get('id', 'unknown')}: {str(e)}")
+                matches.append({
+                    "job_id": job.get("id", "unknown"),
+                    "match_score": 0.0,
+                    "explanation": f"Error occurred during matching: {str(e)}"
+                })
+        return sorted(matches, key=lambda x: x["match_score"], reverse=True)
+    except Exception as e:
+        print(f"Unexpected error in get_candidate_job_matches: {str(e)}")
+        return []
+
+async def search_vector_collection(collection_name, query_vector, top_k=5, filter_query=None):
+    """Generic vector search function using MongoDB Atlas Search"""
+    try:
+        pipeline = [
+            {
+                "$search": {
+                    "index": f"{collection_name}_vector_index",
+                    "vectorSearch": {
+                        "queryVector": query_vector,
+                        "path": "embedding",
+                        "numCandidates": 100,
+                        "limit": top_k
+                    }
+                }
+            }
+        ]
+        
+        # Add any additional filtering
+        if filter_query:
+            pipeline.append({"$match": filter_query})
+            
+        # Exclude the embedding vector from results to reduce data size
+        pipeline.append({
+            "$project": {
+                "_id": 0,
+                "embedding": 0
+            }
+        })
+        
+        results = await Database.get_collection(collection_name).aggregate(pipeline).to_list(length=top_k)
+        return results
+    except Exception as e:
+        print(f"Vector search error: {str(e)}")
+        # Fall back to text-based search if vector search fails
+        return await fallback_text_search(collection_name, query_vector, top_k, filter_query)
+
+async def fallback_text_search(collection_name, query_vector, top_k=5, filter_query=None):
+    """Fallback text search when vector search fails"""
+    # This is a simplified version, in production you'd implement more sophisticated text search
+    base_query = filter_query or {}
+    base_query["is_active"] = True
+    
+    results = await Database.get_collection(collection_name).find(base_query).limit(top_k).to_list(length=top_k)
+    
+    # Remove _id and embedding fields
+    for result in results:
+        if "_id" in result:
+            result.pop("_id")
+        if "embedding" in result:
+            result.pop("embedding")
+            
+    return results
 
 app = FastAPI(title="Job Recommender System")
-recommender = LlamaRecommender()
 
 # Security
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key")
@@ -982,7 +1048,7 @@ async def get_job_recommendations(current_user: dict = Depends(get_current_user)
         raise HTTPException(status_code=404, detail="Candidate profile not found")
     
     jobs = await Database.get_collection(JOBS_COLLECTION).find({"is_active": True}).to_list(length=None)
-    recommendations = recommender.get_candidate_job_matches(candidate, jobs)
+    recommendations = await get_candidate_job_matches(candidate, jobs)
     
     # Save recommendations with score > 70 to recommendations collection
     for rec in recommendations:
@@ -1037,7 +1103,7 @@ async def get_candidate_recommendations(job_id: str, current_user: dict = Depend
         print(f"No active candidates found for job {job_id}")
         return []
     
-    recommendations = recommender.get_job_candidate_matches(job, candidates)
+    recommendations = await get_job_candidate_matches(job, candidates)
     
     # Save high-scoring recommendations to the recommendations collection
     for rec in recommendations:
@@ -1118,7 +1184,7 @@ async def get_project_recommendations(current_user: dict = Depends(get_current_u
         }
         
         # Use the same matching algorithm used for jobs
-        score, explanation = recommender.get_match_score(project_job_format, candidate)
+        score, explanation = await get_match_score(project_job_format, candidate)
         
         # Add to recommendations
         project_recommendation = {
@@ -1203,7 +1269,7 @@ async def get_candidate_recommendations_for_project(project_id: str, current_use
         }
         
         # Use the same matching algorithm
-        score, explanation = recommender.get_match_score(project_job_format, candidate)
+        score, explanation = await get_match_score(project_job_format, candidate)
         
         candidate_id = candidate.get("id")
         recommendation = {
@@ -1255,6 +1321,105 @@ async def get_candidate_recommendations_for_project(project_id: str, current_use
     # Sort by match score
     recommendations = sorted(recommendations, key=lambda x: x["match_score"], reverse=True)
     return recommendations
+
+# Add a semantic search endpoint
+@app.post("/jobs/search", response_model=List[Job])
+async def search_jobs_semantic(
+    search_data: dict,
+    top_k: int = 5,
+    current_user: dict = Depends(get_current_user)
+):
+    """Search for jobs using semantic search"""
+    try:
+        query = search_data.get("query", "")
+        if not query:
+            raise HTTPException(status_code=400, detail="Query parameter is required")
+            
+        query_vector = get_embedding(query)
+        
+        # Use the MongoDB vector search
+        results = await search_vector_collection(
+            JOBS_COLLECTION, 
+            query_vector, 
+            top_k, 
+            {"is_active": True}
+        )
+        
+        return results
+        
+    except Exception as e:
+        print(f"Error in semantic search: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Failed to perform semantic search: {str(e)}")
+
+@app.post("/projects/search", response_model=List[Project])
+async def search_projects_semantic(
+    search_data: dict,
+    top_k: int = 5,
+    current_user: dict = Depends(get_current_user)
+):
+    """Search for projects using semantic search"""
+    try:
+        query = search_data.get("query", "")
+        if not query:
+            raise HTTPException(status_code=400, detail="Query parameter is required")
+            
+        query_vector = get_embedding(query)
+        
+        # Use the MongoDB vector search
+        results = await search_vector_collection(
+            PROJECTS_COLLECTION,
+            query_vector,
+            top_k,
+            {"is_active": True}
+        )
+        
+        return results
+        
+    except Exception as e:
+        print(f"Error in semantic search for projects: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Failed to perform semantic search on projects: {str(e)}")
+
+@app.post("/candidates/search", response_model=List[Candidate])
+async def search_candidates_semantic(
+    search_data: dict,
+    top_k: int = 5,
+    current_user: dict = Depends(get_current_user)
+):
+    """Search for candidates using semantic search"""
+    try:
+        # Only employers can search for candidates
+        if current_user["user_type"] != UserType.EMPLOYER:
+            raise HTTPException(status_code=403, detail="Only employers can search candidates")
+        
+        query = search_data.get("query", "")
+        if not query:
+            raise HTTPException(status_code=400, detail="Query parameter is required")
+            
+        query_vector = get_embedding(query)
+        
+        # Use the MongoDB vector search
+        results = await search_vector_collection(
+            CANDIDATES_COLLECTION,
+            query_vector,
+            top_k,
+            {
+                "is_active": True,
+                "profile_completed": True,
+                "profile_visibility": "public"
+            }
+        )
+        
+        return results
+        
+    except Exception as e:
+        print(f"Error in semantic search for candidates: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Failed to perform semantic search on candidates: {str(e)}")
 
 # User profile endpoints
 @app.put("/profile", response_model=User)
@@ -1710,333 +1875,6 @@ async def update_saved_job(
         print(f"Error in update_saved_job: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to update saved job")
 
-# Add this after recommender initialization
-# Function to get embeddings from Ollama
-def get_embedding(text: str) -> List[float]:
-    """Get embedding from Ollama API"""
-    try:
-        response = requests.post(
-            'http://localhost:11434/api/embeddings',
-            json={
-                "model": "llama3.2:latest",
-                "prompt": text
-            }
-        )
-        data = response.json()
-        return data['embedding']
-    except Exception as e:
-        print(f"Error getting embedding: {e}")
-        # Return empty embedding in case of error
-        return []
-
-def create_job_embedding(job_data: Dict[str, Any]) -> List[float]:
-    """Create a searchable text from job data and get its embedding"""
-    searchable_text = f"{job_data.get('title', '')} {job_data.get('company', '')} {job_data.get('description', '')} {' '.join(job_data.get('requirements', []))} {job_data.get('location', '')}"
-    return get_embedding(searchable_text)
-
-def create_project_embedding(project_data: Dict[str, Any]) -> List[float]:
-    """Create a searchable text from project data and get its embedding"""
-    searchable_text = f"{project_data.get('title', '')} {project_data.get('company', '')} {project_data.get('description', '')} {' '.join(project_data.get('requirements', []))} {' '.join(project_data.get('skills_required', []))} {project_data.get('project_type', '')} {project_data.get('location', '')}"
-    return get_embedding(searchable_text)
-
-def create_candidate_embedding(candidate_data: Dict[str, Any]) -> List[float]:
-    """Create a searchable text from candidate data and get its embedding"""
-    # Combine relevant candidate fields into a searchable text
-    skills_text = ' '.join(candidate_data.get('skills', []))
-    searchable_text = f"{candidate_data.get('full_name', '')} {skills_text} {candidate_data.get('experience', '')} {candidate_data.get('education', '')} {candidate_data.get('location', '')} {candidate_data.get('bio', '')}"
-    return get_embedding(searchable_text)
-
-# Add a semantic search endpoint
-@app.post("/jobs/search", response_model=List[Job])
-async def search_jobs_semantic(
-    search_data: dict,
-    top_k: int = 5,
-    current_user: dict = Depends(get_current_user)
-):
-    """Search for jobs using semantic search"""
-    try:
-        query = search_data.get("query", "")
-        if not query:
-            raise HTTPException(status_code=400, detail="Query parameter is required")
-            
-        query_vector = get_embedding(query)
-        
-        try:
-            # Try to use vector search first
-            results = await Database.get_collection(JOBS_COLLECTION).aggregate([
-                {
-                    "$vectorSearch": {
-                        "queryVector": query_vector,
-                        "path": "embedding",
-                        "numCandidates": 100,
-                        "limit": top_k,
-                        "index": "vector_index"
-                    }
-                },
-                {
-                    "$project": {
-                        "_id": 0,
-                        "id": 1,
-                        "title": 1,
-                        "company": 1,
-                        "description": 1,
-                        "requirements": 1,
-                        "location": 1,
-                        "salary_range": 1,
-                        "created_at": 1,
-                        "is_active": 1,
-                        "employer_id": 1
-                    }
-                }
-            ]).to_list(length=top_k)
-            
-            print(f"Vector search successful, found {len(results)} results")
-            return results
-            
-        except Exception as ve:
-            # Vector search failed, fall back to text search
-            print(f"Vector search failed: {str(ve)}")
-            print("Falling back to text search...")
-            
-            # Use text search with keywords extracted from the query
-            # This is a basic text search, not as good as vector search
-            keywords = query.split()
-            search_conditions = []
-            
-            for keyword in keywords:
-                if len(keyword) > 3:  # Only use keywords with length > 3
-                    search_conditions.append({
-                        "$or": [
-                            {"title": {"$regex": keyword, "$options": "i"}},
-                            {"description": {"$regex": keyword, "$options": "i"}},
-                            {"requirements": {"$regex": keyword, "$options": "i"}}
-                        ]
-                    })
-            
-            if search_conditions:
-                results = await Database.get_collection(JOBS_COLLECTION).find({
-                    "$and": search_conditions,
-                    "is_active": True
-                }).limit(top_k).to_list(length=top_k)
-            else:
-                # If no valid keywords, return recent jobs
-                results = await Database.get_collection(JOBS_COLLECTION).find({
-                    "is_active": True
-                }).sort("created_at", -1).limit(top_k).to_list(length=top_k)
-            
-            # Remove MongoDB's _id and embedding from results
-            for job in results:
-                job.pop("_id", None) if "_id" in job else None
-                job.pop("embedding", None) if "embedding" in job else None
-                
-            print(f"Fallback search successful, found {len(results)} results")
-            return results
-            
-    except Exception as e:
-        print(f"Error in semantic search: {str(e)}")
-        import traceback
-        print(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Failed to perform semantic search: {str(e)}")
-
-@app.post("/projects/search", response_model=List[Project])
-async def search_projects_semantic(
-    search_data: dict,
-    top_k: int = 5,
-    current_user: dict = Depends(get_current_user)
-):
-    """Search for projects using semantic search"""
-    try:
-        query = search_data.get("query", "")
-        if not query:
-            raise HTTPException(status_code=400, detail="Query parameter is required")
-            
-        query_vector = get_embedding(query)
-        
-        try:
-            # Try to use vector search first
-            results = await Database.get_collection(PROJECTS_COLLECTION).aggregate([
-                {
-                    "$vectorSearch": {
-                        "queryVector": query_vector,
-                        "path": "embedding",
-                        "numCandidates": 100,
-                        "limit": top_k,
-                        "index": "project_vector_index"
-                    }
-                },
-                {
-                    "$project": {
-                        "_id": 0,
-                        "id": 1,
-                        "title": 1,
-                        "company": 1,
-                        "description": 1,
-                        "requirements": 1,
-                        "skills_required": 1,
-                        "project_type": 1,
-                        "location": 1,
-                        "budget_range": 1,
-                        "duration": 1,
-                        "status": 1,
-                        "created_at": 1,
-                        "is_active": 1,
-                        "employer_id": 1
-                    }
-                }
-            ]).to_list(length=top_k)
-            
-            print(f"Vector search successful, found {len(results)} results")
-            return results
-            
-        except Exception as ve:
-            # Vector search failed, fall back to text search
-            print(f"Vector search failed: {str(ve)}")
-            print("Falling back to text search...")
-            
-            # Use text search with keywords extracted from the query
-            keywords = query.split()
-            search_conditions = []
-            
-            for keyword in keywords:
-                if len(keyword) > 3:  # Only use keywords with length > 3
-                    search_conditions.append({
-                        "$or": [
-                            {"title": {"$regex": keyword, "$options": "i"}},
-                            {"description": {"$regex": keyword, "$options": "i"}},
-                            {"requirements": {"$regex": keyword, "$options": "i"}},
-                            {"skills_required": {"$regex": keyword, "$options": "i"}},
-                            {"project_type": {"$regex": keyword, "$options": "i"}}
-                        ]
-                    })
-            
-            if search_conditions:
-                results = await Database.get_collection(PROJECTS_COLLECTION).find({
-                    "$and": search_conditions,
-                    "is_active": True
-                }).limit(top_k).to_list(length=top_k)
-            else:
-                # If no valid keywords, return recent projects
-                results = await Database.get_collection(PROJECTS_COLLECTION).find({
-                    "is_active": True
-                }).sort("created_at", -1).limit(top_k).to_list(length=top_k)
-            
-            # Remove MongoDB's _id and embedding from results
-            for project in results:
-                project.pop("_id", None) if "_id" in project else None
-                project.pop("embedding", None) if "embedding" in project else None
-                
-            print(f"Fallback search successful, found {len(results)} results")
-            return results
-        
-    except Exception as e:
-        print(f"Error in semantic search for projects: {str(e)}")
-        import traceback
-        print(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Failed to perform semantic search on projects: {str(e)}")
-
-@app.post("/candidates/search", response_model=List[Candidate])
-async def search_candidates_semantic(
-    search_data: dict,
-    top_k: int = 5,
-    current_user: dict = Depends(get_current_user)
-):
-    """Search for candidates using semantic search"""
-    try:
-        # Only employers can search for candidates
-        if current_user["user_type"] != UserType.EMPLOYER:
-            raise HTTPException(status_code=403, detail="Only employers can search candidates")
-        
-        query = search_data.get("query", "")
-        if not query:
-            raise HTTPException(status_code=400, detail="Query parameter is required")
-            
-        query_vector = get_embedding(query)
-        
-        try:
-            # Try to use vector search first
-            results = await Database.get_collection(CANDIDATES_COLLECTION).aggregate([
-                {
-                    "$vectorSearch": {
-                        "queryVector": query_vector,
-                        "path": "embedding",
-                        "numCandidates": 100,
-                        "limit": top_k,
-                        "index": "candidate_vector_index"
-                    }
-                },
-                {
-                    "$project": {
-                        "_id": 0,
-                        "id": 1,
-                        "email": 1,
-                        "user_type": 1,
-                        "full_name": 1,
-                        "skills": 1,
-                        "experience": 1,
-                        "education": 1,
-                        "location": 1,
-                        "bio": 1,
-                        "created_at": 1,
-                        "profile_completed": 1,
-                        "last_active": 1,
-                        "profile_visibility": 1
-                    }
-                }
-            ]).to_list(length=top_k)
-            
-            print(f"Vector search successful, found {len(results)} results")
-            return results
-            
-        except Exception as ve:
-            # Vector search failed, fall back to text search
-            print(f"Vector search failed: {str(ve)}")
-            print("Falling back to text search...")
-            
-            # Use text search with keywords extracted from the query
-            keywords = query.split()
-            search_conditions = []
-            
-            for keyword in keywords:
-                if len(keyword) > 3:  # Only use keywords with length > 3
-                    search_conditions.append({
-                        "$or": [
-                            {"full_name": {"$regex": keyword, "$options": "i"}},
-                            {"skills": {"$regex": keyword, "$options": "i"}},
-                            {"experience": {"$regex": keyword, "$options": "i"}},
-                            {"education": {"$regex": keyword, "$options": "i"}},
-                            {"bio": {"$regex": keyword, "$options": "i"}}
-                        ]
-                    })
-            
-            if search_conditions:
-                results = await Database.get_collection(CANDIDATES_COLLECTION).find({
-                    "$and": search_conditions,
-                    "is_active": True,
-                    "profile_completed": True,
-                    "profile_visibility": "public"
-                }).limit(top_k).to_list(length=top_k)
-            else:
-                # If no valid keywords, return recent active candidates
-                results = await Database.get_collection(CANDIDATES_COLLECTION).find({
-                    "is_active": True,
-                    "profile_completed": True,
-                    "profile_visibility": "public"
-                }).sort("last_active", -1).limit(top_k).to_list(length=top_k)
-            
-            # Remove MongoDB's _id, embedding, and sensitive fields from results
-            for candidate in results:
-                candidate.pop("_id", None) if "_id" in candidate else None
-                candidate.pop("embedding", None) if "embedding" in candidate else None
-                
-            print(f"Fallback search successful, found {len(results)} results")
-            return results
-        
-    except Exception as e:
-        print(f"Error in semantic search for candidates: {str(e)}")
-        import traceback
-        print(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Failed to perform semantic search on candidates: {str(e)}")
-
 @app.get("/recommendations/stored", response_model=List[dict])
 async def get_stored_recommendations(current_user: dict = Depends(get_current_user)):
     """Get all stored recommendations for the current user"""
@@ -2162,4 +2000,4 @@ async def mark_recommendation_as_viewed(
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8003)

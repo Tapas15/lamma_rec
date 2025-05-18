@@ -28,6 +28,7 @@ A FastAPI-based job portal API that connects employers and candidates, featuring
 - Save interesting job postings
 
 ### AI-Powered Recommendation System
+- MongoDB Vector Search for efficient similarity matching
 - Semantic matching using Llama 3 embeddings
 - Cosine similarity scoring between job/project and candidate profiles
 - Match score threshold (70+) for high-quality recommendations
@@ -47,7 +48,7 @@ A FastAPI-based job portal API that connects employers and candidates, featuring
 ## Prerequisites
 
 - Python 3.8+
-- MongoDB
+- MongoDB with Vector Search capability
 - Ollama with llama3.2 model
 - pip (Python package manager)
 
@@ -85,22 +86,27 @@ ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=30
 ```
 
+6. Set up MongoDB Vector Search indexes:
+```bash
+python create_vector_indexes.py
+```
+
 ## Running the Application
 
 1. Start MongoDB service
 2. Ensure Ollama is running and the llama3.2 model is available
 3. Run the FastAPI application:
 ```bash
-uvicorn main:app --reload --port 8001
+uvicorn main:app --reload --port 8003
 ```
 
-The API will be available at `http://localhost:8001`
+The API will be available at `http://localhost:8003`
 
 ## API Documentation
 
 Once the application is running, you can access:
-- Interactive API documentation: `http://localhost:8001/docs`
-- Alternative API documentation: `http://localhost:8001/redoc`
+- Interactive API documentation: `http://localhost:8003/docs`
+- Alternative API documentation: `http://localhost:8003/redoc`
 
 ## API Endpoints
 
@@ -165,36 +171,77 @@ Lamma_rec/
 ├── requirements.txt     # Project dependencies
 ├── test_recommendations.py # Test recommendation features
 ├── test_recommendation_threshold.py # Test threshold functionality
+├── test_end_to_end.py   # End-to-end test script
+├── create_vector_indexes.py # Script to create MongoDB vector search indexes
 ├── .env                # Environment variables
 └── README.md           # Project documentation
 ```
 
 ## Recommendation Engine
 
-The system uses Llama 3.2 embeddings to create vector representations of:
+The system uses MongoDB Vector Search with Llama 3.2 embeddings to create and query vector representations of:
 - Job listings (title, description, requirements)
 - Project listings (title, description, requirements, skills)
 - Candidate profiles (skills, experience, education)
 
 These embeddings enable:
-1. Accurate matching between candidates and opportunities
-2. Sophisticated relevance scoring (0-100)
-3. Semantic search capabilities
+1. Accurate matching between candidates and opportunities using MongoDB's vector search capabilities
+2. Sophisticated relevance scoring (0-100) based on cosine similarity
+3. Efficient semantic search capabilities
 4. Explanation of matches including matching and missing skills
 
 The system automatically identifies and stores high-quality matches (score >= 70) for both employers and candidates to easily access.
 
+## Vector Search Implementation
+
+The recommendation system leverages MongoDB's vector search capabilities:
+1. Documents are embedded using Llama 3.2 embeddings
+2. Vector indexes are created on the embedding fields
+3. The `$vectorSearch` operator is used to find similar documents
+4. A fallback keyword matching system is used when vector search is unavailable
+
+Benefits of this approach:
+- Efficient similarity searches across large collections
+- Scalable recommendation generation
+- Better semantic understanding of job and candidate data
+- Fast query performance for real-time recommendations
+
 ## Testing
 
-The project includes two test scripts:
+The project includes three test scripts:
+
+### Basic Tests
 - `test_recommendations.py`: Tests general recommendation functionality
 - `test_recommendation_threshold.py`: Tests the threshold (70+) functionality for recommendation storage
 
-Run tests with:
+Run basic tests with:
 ```bash
 python test_recommendations.py
 python test_recommendation_threshold.py
 ```
+
+### End-to-End Testing
+The `test_end_to_end.py` script performs comprehensive testing of the entire system workflow:
+
+1. User registration (employers and candidates)
+2. Authentication and token handling
+3. Job and project creation
+4. Recommendation generation and quality validation
+5. Semantic search functionality
+6. Job application process
+7. Saved job functionality
+8. Stored recommendation access
+
+Run the end-to-end test with:
+```bash
+python test_end_to_end.py
+```
+
+The test creates test users with different skill profiles and validates that:
+- Python developers get higher match scores for Python jobs/projects
+- Mobile developers get higher match scores for mobile jobs/projects
+- Semantic search returns relevant results
+- Recommendations above 70% score are properly stored
 
 ## Security Features
 
