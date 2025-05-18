@@ -5,8 +5,8 @@ import time
 
 # Load environment variables
 load_dotenv()
-MONGODB_URL = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
-DATABASE_NAME = os.getenv("DATABASE_NAME", "lamma_rec")
+MONGODB_URL = "mongodb+srv://tapu199824:1234567890@cluster0.5q7vyy1.mongodb.net/?retryWrites=true&w=majority"
+DATABASE_NAME = "job_recommender"
 
 # Collections
 JOBS_COLLECTION = "jobs"
@@ -37,7 +37,7 @@ def create_vector_indexes():
                 "dynamic": false,
                 "fields": {
                   "embedding": {
-                    "dimensions": 4096,
+                    "dimensions": 3072,
                     "similarity": "cosine",
                     "type": "vector"
                   }

@@ -17,21 +17,43 @@ from utils.database import Database, USERS_COLLECTION, JOBS_COLLECTION, RECOMMEN
 
 load_dotenv()
 
-# Function to get embeddings from Ollama
+# Groq API configuration
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_EMBEDDING_MODEL = os.getenv("GROQ_EMBEDDING_MODEL", "llama3-embed-8b")
+GROQ_API_BASE = os.getenv("GROQ_API_BASE", "https://api.groq.com/v1")
+
+# Function to get embeddings from Groq
 def get_embedding(text: str) -> List[float]:
-    """Get embedding from Ollama API"""
+    """Get embedding from Groq API"""
     try:
+        if not GROQ_API_KEY:
+            raise ValueError("GROQ_API_KEY environment variable is not set")
+        
+        headers = {
+            "Authorization": f"Bearer {GROQ_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
         response = requests.post(
-            'http://localhost:11434/api/embeddings',
+            f"{GROQ_API_BASE}/embeddings",
+            headers=headers,
             json={
-                "model": "llama3.2:latest",
-                "prompt": text
+                "model": GROQ_EMBEDDING_MODEL,
+                "input": text
             }
         )
+        
+        response.raise_for_status()  # Raise exception for HTTP errors
         data = response.json()
-        return data['embedding']
+        
+        # Extract embedding from the response
+        if "data" in data and len(data["data"]) > 0 and "embedding" in data["data"][0]:
+            return data["data"][0]["embedding"]
+        else:
+            print("Unexpected response format from Groq API")
+            return []
     except Exception as e:
-        print(f"Error getting embedding: {e}")
+        print(f"Error getting embedding from Groq: {e}")
         # Return empty embedding in case of error
         return []
 
