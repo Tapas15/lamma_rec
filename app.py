@@ -260,63 +260,7 @@ BLACKLISTED_TOKENS = set()
 async def startup_db_client():
     await Database.connect_db()
     await init_db()
-    await init_vector_indexes()
     print("Database initialized and ready for use")
-
-# Add vector index initialization function
-async def init_vector_indexes():
-    """Initialize MongoDB vector search indexes for all collections that need vector search"""
-    try:
-        db = Database.get_db()
-        print("Setting up vector search indexes...")
-        
-        # Create regular indexes for jobs collection
-        await db[JOBS_COLLECTION].create_index("is_active")
-        await db[JOBS_COLLECTION].create_index("employer_id")
-        
-        # Create regular indexes for candidates collection
-        await db[CANDIDATES_COLLECTION].create_index("is_active")
-        await db[CANDIDATES_COLLECTION].create_index("profile_completed")
-        await db[CANDIDATES_COLLECTION].create_index("profile_visibility")
-        
-        # Create regular indexes for projects collection
-        await db[PROJECTS_COLLECTION].create_index("is_active")
-        await db[PROJECTS_COLLECTION].create_index("employer_id")
-        await db[PROJECTS_COLLECTION].create_index("status")
-        
-        print("Regular indexes created successfully")
-        
-        # Check if Atlas Search indexes already exist
-        # Since this requires Atlas UI or API to create, we'll just display instructions
-        # if this is the first run or if they need to be recreated
-        print("\nIMPORTANT: For vector search functionality, verify these Atlas Search indexes exist:")
-        print("If not, please create them manually using the MongoDB Atlas UI.")
-        print("\n1. For JOBS collection:")
-        print(f"   Index name: {JOBS_COLLECTION}_vector_index")
-        print("   Configuration:")
-        print("""   {
-     "mappings": {
-       "dynamic": false,
-       "fields": {
-         "embedding": {
-           "dimensions": 4096,
-           "similarity": "cosine",
-           "type": "vector"
-         }
-       }
-     }
-   }""")
-        
-        print("\n2. For CANDIDATES collection:")
-        print(f"   Index name: {CANDIDATES_COLLECTION}_vector_index")
-        print("   Same configuration as above")
-        
-        print("\n3. For PROJECTS collection:")
-        print(f"   Index name: {PROJECTS_COLLECTION}_vector_index")
-        print("   Same configuration as above")
-        
-    except Exception as e:
-        print(f"Error initializing vector indexes: {e}")
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
