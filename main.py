@@ -3,10 +3,12 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Dict, Any
 import os
 from dotenv import load_dotenv
 from bson import ObjectId
+import requests
+import numpy as np
 
 from models import *
 from database import Database, USERS_COLLECTION, JOBS_COLLECTION, RECOMMENDATIONS_COLLECTION, CANDIDATES_COLLECTION, EMPLOYERS_COLLECTION, PROJECTS_COLLECTION, JOB_APPLICATIONS_COLLECTION, SAVED_JOBS_COLLECTION, init_db
@@ -95,7 +97,7 @@ async def register_candidate(user: CandidateCreate):
         existing_user = await Database.get_collection(USERS_COLLECTION).find_one({"email": user.email})
         if existing_user:
             raise HTTPException(status_code=400, detail="Email already registered")
-    
+        
         # Generate MongoDB ObjectId
         object_id = ObjectId()
         str_id = str(object_id)
@@ -103,13 +105,13 @@ async def register_candidate(user: CandidateCreate):
     
         # Create user document
         user_dict = {
-        "_id": object_id,
-        "id": str_id,
-        "email": user.email,
-        "password": pwd_context.hash(user.password),
-        "full_name": user.full_name,
-        "user_type": "candidate",
-        "created_at": current_time
+            "_id": object_id,
+            "id": str_id,
+            "email": user.email,
+            "password": pwd_context.hash(user.password),
+            "full_name": user.full_name,
+            "user_type": "candidate",
+            "created_at": current_time
         }
     
         # Insert into users collection
@@ -117,40 +119,44 @@ async def register_candidate(user: CandidateCreate):
     
         # Create candidate profile with comprehensive fields
         candidate_dict = {
-        "_id": object_id,
-        "id": str_id,
-        "email": user.email,
-        "user_type": "candidate",
-        "full_name": user.full_name,
-        "created_at": current_time,
-        "skills": user.skills or [],
-        "experience": user.experience or "No experience provided",
-        "education": user.education or "No education details provided",
-        "location": user.location or "Location not specified",
-        "bio": user.bio or "No bio provided",
-        # Add additional candidate-specific fields
-        "profile_completed": True,
-        "is_active": True,
-        "last_active": current_time,
-        "resume_url": None,
-        "profile_visibility": "public",
-        "job_preferences": {
-        "job_types": [],
-        "preferred_locations": [],
-        "salary_expectation": None,
-        "remote_work": True
-        },
-        "profile_views": 0,
-        "job_applications": [],
-        "saved_jobs": [],
-        "match_score_threshold": 70  # minimum match score for job recommendations
+            "_id": object_id,
+            "id": str_id,
+            "email": user.email,
+            "user_type": "candidate",
+            "full_name": user.full_name,
+            "created_at": current_time,
+            "skills": user.skills or [],
+            "experience": user.experience or "No experience provided",
+            "education": user.education or "No education details provided",
+            "location": user.location or "Location not specified",
+            "bio": user.bio or "No bio provided",
+            # Add additional candidate-specific fields
+            "profile_completed": True,
+            "is_active": True,
+            "last_active": current_time,
+            "resume_url": None,
+            "profile_visibility": "public",
+            "job_preferences": {
+                "job_types": [],
+                "preferred_locations": [],
+                "salary_expectation": None,
+                "remote_work": True
+            },
+            "profile_views": 0,
+            "job_applications": [],
+            "saved_jobs": [],
+            "match_score_threshold": 70  # minimum match score for job recommendations
         }
+        
+        # Generate embedding for the candidate
+        candidate_dict["embedding"] = create_candidate_embedding(candidate_dict)
         
         # Insert into candidates collection
         await Database.get_collection(CANDIDATES_COLLECTION).insert_one(candidate_dict)
     
         # Remove sensitive fields for response
         candidate_dict.pop("_id", None)
+        candidate_dict.pop("embedding", None)
         
         return candidate_dict
     
@@ -182,65 +188,65 @@ async def register_employer(user: EmployerCreate):
         existing_user = await Database.get_collection(USERS_COLLECTION).find_one({"email": user.email})
         if existing_user:
             raise HTTPException(status_code=400, detail="Email already registered")
-    
+        
         # Generate MongoDB ObjectId
         object_id = ObjectId()
         str_id = str(object_id)
         current_time = datetime.utcnow()
-    
+        
         # Create user document
         user_dict = {
-        "_id": object_id,
-        "id": str_id,
-        "email": user.email,
-        "password": pwd_context.hash(user.password),
-        "full_name": user.full_name,
-        "user_type": "employer",
-        "created_at": current_time
+            "_id": object_id,
+            "id": str_id,
+            "email": user.email,
+            "password": pwd_context.hash(user.password),
+            "full_name": user.full_name,
+            "user_type": "employer",
+            "created_at": current_time
         }
-    
+        
         # Insert into users collection
         await Database.get_collection(USERS_COLLECTION).insert_one(user_dict)
-    
+        
         # Create employer profile with all fields
         employer_dict = {
-        "_id": object_id,
-        "id": str_id,
-        "email": user.email,
-        "user_type": "employer",
-        "full_name": user.full_name,
-        "company_name": user.company_name,
-        "company_description": user.company_description or "Company description not provided",
-        "company_website": user.company_website or "Website not provided",
-        "company_location": user.company_location or "Location not specified",
-        "company_size": user.company_size or "Company size not specified",
-        "industry": user.industry or "Industry not specified",
-        "contact_email": user.contact_email or user.email,
-        "contact_phone": user.contact_phone or "Phone not provided",
-        "location": user.location or user.company_location or "Location not specified",
-        "bio": user.bio or "Bio not provided",
-        "created_at": current_time,
-        # Add additional employer-specific fields with default values
-        "profile_completed": True,
-        "is_active": True,
-        "last_active": current_time,
-        "verified": False,  # Default to False, can be verified later
-        "total_jobs_posted": 0,
-        "total_active_jobs": 0,
-        "account_type": "standard",  # Can be used for different subscription levels
-        "profile_views": 0,
-        "rating": None,  # Can be used for employer ratings
-        "social_links": {
-        "linkedin": user.linkedin or "",
-        "twitter": user.twitter or "",
-        "website": user.company_website or ""
-        },
-        "posted_jobs": []
+            "_id": object_id,
+            "id": str_id,
+            "email": user.email,
+            "user_type": "employer",
+            "full_name": user.full_name,
+            "company_name": user.company_name,
+            "company_description": user.company_description or "Company description not provided",
+            "company_website": user.company_website or "Website not provided",
+            "company_location": user.company_location or "Location not specified",
+            "company_size": user.company_size or "Company size not specified",
+            "industry": user.industry or "Industry not specified",
+            "contact_email": user.contact_email or user.email,
+            "contact_phone": user.contact_phone or "Phone not provided",
+            "location": user.location or user.company_location or "Location not specified",
+            "bio": user.bio or "Bio not provided",
+            "created_at": current_time,
+            # Add additional employer-specific fields with default values
+            "profile_completed": True,
+            "is_active": True,
+            "last_active": current_time,
+            "verified": False,  # Default to False, can be verified later
+            "total_jobs_posted": 0,
+            "total_active_jobs": 0,
+            "account_type": "standard",  # Can be used for different subscription levels
+            "profile_views": 0,
+            "rating": None,  # Can be used for employer ratings
+            "social_links": {
+                "linkedin": user.linkedin or "",
+                "twitter": user.twitter or "",
+                "website": user.company_website or ""
+            },
+            "posted_jobs": []
         }
-    
+        
         # Insert into employers collection
         await Database.get_collection(EMPLOYERS_COLLECTION).insert_one(employer_dict)
-    
+        
         # Remove sensitive fields for response
         # Password is not in employer_dict, it's in user_dict which is not directly returned.
         # _id is specific to MongoDB and usually not exposed directly if 'id' (string version) is used.
@@ -248,7 +254,7 @@ async def register_employer(user: EmployerCreate):
         clean_employer_dict.pop("_id", None) 
         
         return clean_employer_dict
-    
+        
     except Exception as e:
         print(f"Error in register_employer: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to register employer")
@@ -308,7 +314,14 @@ async def create_job(job: JobCreate, current_user: dict = Depends(get_current_us
     job_dict = job.dict()
     job_dict["id"] = str(ObjectId())
     job_dict["is_active"] = True
+    
+    # Create embedding for semantic search
+    job_dict["embedding"] = create_job_embedding(job_dict)
+    
     await Database.get_collection(JOBS_COLLECTION).insert_one(job_dict)
+    
+    # Remove embedding from returned data to reduce response size
+    job_dict.pop("embedding", None)
     return job_dict
 
 @app.get("/jobs", response_model=List[Job])
@@ -381,6 +394,15 @@ async def update_job(
             detail="You can only update your own jobs"
         )
     
+    # If fields that affect the embedding are updated, regenerate embedding
+    semantic_fields = ["title", "company", "description", "requirements", "location"]
+    if any(field in update_data for field in semantic_fields):
+        # Create updated job data by merging current job with updates
+        updated_job = {**job}
+        updated_job.update(update_data)
+        # Generate new embedding
+        update_data["embedding"] = create_job_embedding(updated_job)
+    
     # Update the job
     result = await Database.get_collection(JOBS_COLLECTION).update_one(
         {"id": job_id},
@@ -401,8 +423,9 @@ async def update_job(
             detail="Job not found after update"
         )
     
-    # Remove MongoDB's _id
+    # Remove MongoDB's _id and embedding vector from response
     updated_job.pop("_id", None)
+    updated_job.pop("embedding", None)
     
     return updated_job
 
@@ -445,6 +468,9 @@ async def create_project(project: ProjectCreate, current_user: dict = Depends(ge
         # Remove any None values to prevent null constraints
         project_dict = {k: v for k, v in project_dict.items() if v is not None}
         
+        # Create embedding for semantic search
+        project_dict["embedding"] = create_project_embedding(project_dict)
+        
         # Insert the project
         await Database.get_collection(PROJECTS_COLLECTION).insert_one(project_dict)
         
@@ -457,9 +483,12 @@ async def create_project(project: ProjectCreate, current_user: dict = Depends(ge
             if not created_project:
                 raise HTTPException(status_code=500, detail="Failed to create project - cannot find it after creation")
             
-        # Remove MongoDB's _id
+        # Remove MongoDB's _id and embedding from response
         if "_id" in created_project:
             created_project.pop("_id", None)
+            
+        if "embedding" in created_project:
+            created_project.pop("embedding", None)
             
         print(f"DEBUG - Project created successfully: id={created_project['id']}")
         return created_project
@@ -538,7 +567,7 @@ async def get_current_employer_projects(current_user: dict = Depends(get_current
         # Check if user is an employer
         if current_user.get("user_type") != "employer":
             raise HTTPException(status_code=403, detail="Only employers can view their projects")
-        
+    
         employer_id = current_user.get("id")
         if not employer_id:
             raise HTTPException(status_code=400, detail="Invalid employer ID")
@@ -662,7 +691,7 @@ async def update_project_status(
                 raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {', '.join(valid_statuses)}")
         
         # Remove any invalid fields from update_data
-        allowed_fields = ["status", "description", "title", "requirements", "budget_range", "duration", "location", "skills_required", "is_active"]
+        allowed_fields = ["status", "description", "title", "requirements", "budget_range", "duration", "location", "skills_required", "is_active", "project_type"]
         invalid_fields = [key for key in update_data.keys() if key not in allowed_fields]
         for field in invalid_fields:
             print(f"DEBUG: Removing invalid field from update: {field}")
@@ -674,19 +703,29 @@ async def update_project_status(
             
         # Add updated timestamp
         update_data["last_updated"] = datetime.utcnow()
-        print(f"DEBUG: Update data: {update_data}")
         
+        # If fields that affect the embedding are updated, regenerate embedding
+        semantic_fields = ["title", "company", "description", "requirements", "skills_required", "project_type", "location"]
+        if any(field in update_data for field in semantic_fields):
+            # Create updated project data by merging current project with updates
+            updated_project = {**project}
+            updated_project.update(update_data)
+            # Generate new embedding
+            update_data["embedding"] = create_project_embedding(updated_project)
+        
+        print(f"DEBUG: Update data: {update_data}")
+    
         # Update the project
         result = await Database.get_collection(PROJECTS_COLLECTION).update_one(
             {"id": project_id},
             {"$set": update_data}
         )
         print(f"DEBUG: Update result: matched={result.matched_count}, modified={result.modified_count}")
-        
+    
         if result.matched_count == 0:
             print("DEBUG: No documents were matched")
             raise HTTPException(status_code=404, detail="Project not found") 
-        
+    
         # Return updated project
         updated_project = await Database.get_collection(PROJECTS_COLLECTION).find_one({"id": project_id})
         if not updated_project:
@@ -695,6 +734,10 @@ async def update_project_status(
         
         if "_id" in updated_project:
             updated_project.pop("_id", None)
+            
+        # Remove embedding from response
+        if "embedding" in updated_project:
+            updated_project.pop("embedding", None)
         
         print(f"DEBUG: Project updated successfully: {project_id}")    
         return updated_project
@@ -830,7 +873,21 @@ async def update_profile(profile_data: dict, current_user: dict = Depends(get_cu
             {"$set": profile_data}
         )
         
-        # Update candidate profile
+        # Check if any field affects candidate embedding
+        semantic_fields = ["full_name", "skills", "experience", "education", "location", "bio"]
+        if any(field in profile_data for field in semantic_fields):
+            # Get the current candidate data
+            candidate = await Database.get_collection(CANDIDATES_COLLECTION).find_one(
+                {"email": current_user["email"]}
+            )
+            if candidate:
+                # Create updated candidate data by merging
+                updated_candidate = {**candidate}
+                updated_candidate.update(profile_data)
+                # Generate new embedding
+                profile_data["embedding"] = create_candidate_embedding(updated_candidate)
+        
+        # Update candidate profile with new data including potential new embedding
         await Database.get_collection(CANDIDATES_COLLECTION).update_one(
             {"email": current_user["email"]},
             {"$set": profile_data}
@@ -840,6 +897,11 @@ async def update_profile(profile_data: dict, current_user: dict = Depends(get_cu
         updated_profile = await Database.get_collection(CANDIDATES_COLLECTION).find_one(
             {"email": current_user["email"]}
         )
+        
+        # Remove embedding from response
+        if updated_profile and "embedding" in updated_profile:
+            updated_profile.pop("embedding", None)
+            
         return updated_profile
     else:
         # Update both user and employer profiles
@@ -1253,6 +1315,189 @@ async def update_saved_job(
     except Exception as e:
         print(f"Error in update_saved_job: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to update saved job")
+
+# Add this after recommender initialization
+# Function to get embeddings from Ollama
+def get_embedding(text: str) -> List[float]:
+    """Get embedding from Ollama API"""
+    try:
+        response = requests.post(
+            'http://localhost:11434/api/embeddings',
+            json={
+                "model": "llama3.2:latest",
+                "prompt": text
+            }
+        )
+        data = response.json()
+        return data['embedding']
+    except Exception as e:
+        print(f"Error getting embedding: {e}")
+        # Return empty embedding in case of error
+        return []
+
+def create_job_embedding(job_data: Dict[str, Any]) -> List[float]:
+    """Create a searchable text from job data and get its embedding"""
+    searchable_text = f"{job_data.get('title', '')} {job_data.get('company', '')} {job_data.get('description', '')} {' '.join(job_data.get('requirements', []))} {job_data.get('location', '')}"
+    return get_embedding(searchable_text)
+
+def create_project_embedding(project_data: Dict[str, Any]) -> List[float]:
+    """Create a searchable text from project data and get its embedding"""
+    searchable_text = f"{project_data.get('title', '')} {project_data.get('company', '')} {project_data.get('description', '')} {' '.join(project_data.get('requirements', []))} {' '.join(project_data.get('skills_required', []))} {project_data.get('project_type', '')} {project_data.get('location', '')}"
+    return get_embedding(searchable_text)
+
+def create_candidate_embedding(candidate_data: Dict[str, Any]) -> List[float]:
+    """Create a searchable text from candidate data and get its embedding"""
+    # Combine relevant candidate fields into a searchable text
+    skills_text = ' '.join(candidate_data.get('skills', []))
+    searchable_text = f"{candidate_data.get('full_name', '')} {skills_text} {candidate_data.get('experience', '')} {candidate_data.get('education', '')} {candidate_data.get('location', '')} {candidate_data.get('bio', '')}"
+    return get_embedding(searchable_text)
+
+# Add a semantic search endpoint
+@app.post("/jobs/search", response_model=List[Job])
+async def search_jobs_semantic(
+    query: str, 
+    top_k: int = 5,
+    current_user: dict = Depends(get_current_user)
+):
+    """Search for jobs using semantic search"""
+    try:
+        query_vector = get_embedding(query)
+        
+        # Search for similar jobs using MongoDB's $vectorSearch
+        results = await Database.get_collection(JOBS_COLLECTION).aggregate([
+            {
+                "$vectorSearch": {
+                    "queryVector": query_vector,
+                    "path": "embedding",
+                    "numCandidates": 100,
+                    "limit": top_k,
+                    "index": "vector_index"
+                }
+            },
+            {
+                "$project": {
+                    "_id": 0,
+                    "id": 1,
+                    "title": 1,
+                    "company": 1,
+                    "description": 1,
+                    "requirements": 1,
+                    "location": 1,
+                    "salary_range": 1,
+                    "created_at": 1,
+                    "is_active": 1,
+                    "employer_id": 1
+                }
+            }
+        ]).to_list(length=top_k)
+        
+        return results
+    except Exception as e:
+        print(f"Error in semantic search: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Failed to perform semantic search: {str(e)}")
+
+@app.post("/projects/search", response_model=List[Project])
+async def search_projects_semantic(
+    query: str, 
+    top_k: int = 5,
+    current_user: dict = Depends(get_current_user)
+):
+    """Search for projects using semantic search"""
+    try:
+        query_vector = get_embedding(query)
+        
+        # Search for similar projects using MongoDB's $vectorSearch
+        results = await Database.get_collection(PROJECTS_COLLECTION).aggregate([
+            {
+                "$vectorSearch": {
+                    "queryVector": query_vector,
+                    "path": "embedding",
+                    "numCandidates": 100,
+                    "limit": top_k,
+                    "index": "project_vector_index"
+                }
+            },
+            {
+                "$project": {
+                    "_id": 0,
+                    "id": 1,
+                    "title": 1,
+                    "company": 1,
+                    "description": 1,
+                    "requirements": 1,
+                    "skills_required": 1,
+                    "project_type": 1,
+                    "location": 1,
+                    "budget_range": 1,
+                    "duration": 1,
+                    "status": 1,
+                    "created_at": 1,
+                    "is_active": 1,
+                    "employer_id": 1
+                }
+            }
+        ]).to_list(length=top_k)
+        
+        return results
+    except Exception as e:
+        print(f"Error in semantic search for projects: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Failed to perform semantic search on projects: {str(e)}")
+
+@app.post("/candidates/search", response_model=List[Candidate])
+async def search_candidates_semantic(
+    query: str, 
+    top_k: int = 5,
+    current_user: dict = Depends(get_current_user)
+):
+    """Search for candidates using semantic search"""
+    try:
+        # Only employers can search for candidates
+        if current_user["user_type"] != UserType.EMPLOYER:
+            raise HTTPException(status_code=403, detail="Only employers can search candidates")
+            
+        query_vector = get_embedding(query)
+        
+        # Search for similar candidates using MongoDB's $vectorSearch
+        results = await Database.get_collection(CANDIDATES_COLLECTION).aggregate([
+            {
+                "$vectorSearch": {
+                    "queryVector": query_vector,
+                    "path": "embedding",
+                    "numCandidates": 100,
+                    "limit": top_k,
+                    "index": "candidate_vector_index"
+                }
+            },
+            {
+                "$project": {
+                    "_id": 0,
+                    "id": 1,
+                    "email": 1,
+                    "user_type": 1,
+                    "full_name": 1,
+                    "skills": 1,
+                    "experience": 1,
+                    "education": 1,
+                    "location": 1,
+                    "bio": 1,
+                    "created_at": 1,
+                    "profile_completed": 1,
+                    "last_active": 1,
+                    "profile_visibility": 1
+                }
+            }
+        ]).to_list(length=top_k)
+        
+        return results
+    except Exception as e:
+        print(f"Error in semantic search for candidates: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Failed to perform semantic search on candidates: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
