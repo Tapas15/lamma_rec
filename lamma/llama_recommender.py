@@ -12,6 +12,7 @@ class LlamaRecommender:
     def __init__(self, model_name: str = "llama3.2:latest"):
         self.model_name = model_name
         self.ollama_url = "http://localhost:11434/api/generate"
+        self.ollama_available = True
         print(f"Using Ollama model: {model_name}")
 
         try:
@@ -22,8 +23,10 @@ class LlamaRecommender:
                     print(f"Warning: Model {model_name} not found. Available models: {[m['name'] for m in models]}")
             else:
                 print("Warning: Could not verify available models")
+                self.ollama_available = False
         except requests.exceptions.ConnectionError:
-            print("Error: Could not connect to Ollama. Make sure it's running on port 11434")
+            print("Error: Could not connect to Ollama. Will use fallback scoring mechanism.")
+            self.ollama_available = False
 
     def _generate_prompt(self, job_info: Dict, candidate_info: Dict) -> str:
         prompt = f"""You are an expert AI job matching system. Your task is to evaluate how well this candidate matches the job requirements.
@@ -60,6 +63,10 @@ Your evaluation:"""
         return prompt
 
     def get_match_score(self, job_info: Dict, candidate_info: Dict) -> Tuple[float, str]:
+        if not self.ollama_available:
+            # Fallback mechanism when Ollama is not available
+            return self._calculate_fallback_score(job_info, candidate_info)
+            
         prompt = self._generate_prompt(job_info, candidate_info)
 
         max_retries = 3
@@ -104,14 +111,44 @@ Your evaluation:"""
                     time.sleep(retry_delay)
                 else:
                     print(f"Error calling Ollama after {max_retries} attempts: {str(e)}")
-                    return 0.0, f"Error: {str(e)}"
+                    self.ollama_available = False
+                    return self._calculate_fallback_score(job_info, candidate_info)
+
+    def _calculate_fallback_score(self, job_info: Dict, candidate_info: Dict) -> Tuple[float, str]:
+        """Simple keyword matching algorithm as a fallback when Ollama is not available"""
+        job_requirements = set(job_info.get("requirements", []))
+        if not job_requirements and "required_skills" in job_info:
+            job_requirements = set(job_info.get("required_skills", []))
+            
+        candidate_skills = set(candidate_info.get("skills", []))
+        
+        # Calculate skill match percentage
+        if not job_requirements:
+            skill_match = 50.0  # Default if no requirements specified
+        else:
+            matched_skills = job_requirements.intersection(candidate_skills)
+            skill_match = (len(matched_skills) / len(job_requirements)) * 100
+        
+        # Add location match bonus
+        location_match = 0
+        if job_info.get("location") == candidate_info.get("location"):
+            location_match = 10
+        
+        # Create explanation
+        explanation = f"Keyword match algorithm (fallback): Found {len(job_requirements.intersection(candidate_skills))} matching skills out of {len(job_requirements)} required skills."
+        
+        # Simple score calculation (primarily based on matching skills)
+        score = min(100, skill_match + location_match)
+        
+        return score, explanation
 
     def get_job_candidate_matches(self, job_info: Dict, candidates: List[Dict]) -> List[Dict]:
         matches = []
         for candidate in candidates:
+            candidate_id = candidate.get("id") if "id" in candidate else str(candidate.get("_id", "unknown"))
             score, explanation = self.get_match_score(job_info, candidate)
             matches.append({
-                "candidate_id": str(candidate["_id"]),
+                "candidate_id": candidate_id,
                 "match_score": score,
                 "explanation": explanation
             })

@@ -77,6 +77,52 @@ class CandidatePortal:
             print(f"Error applying for job: {str(e)}")
             return False
     
+    def update_application(self, application_id, cover_letter=None, notes=None):
+        if not self.token:
+            print("Please login first.")
+            return False
+        
+        update_data = {}
+        if cover_letter is not None:
+            update_data["cover_letter"] = cover_letter
+        if notes is not None:
+            update_data["notes"] = notes
+        
+        try:
+            # Using PATCH to update only specified fields
+            response = requests.patch(f"{BASE_URL}/applications/{application_id}", 
+                                    headers=self.headers, 
+                                    json=update_data)
+            if response.status_code == 200:
+                print("Application updated successfully!")
+                return True
+            else:
+                print(f"Failed to update application. Status: {response.status_code}")
+                print(f"Error: {response.json().get('detail', 'Unknown error')}")
+                return False
+        except Exception as e:
+            print(f"Error updating application: {str(e)}")
+            return False
+    
+    def delete_application(self, application_id):
+        if not self.token:
+            print("Please login first.")
+            return False
+        
+        try:
+            response = requests.delete(f"{BASE_URL}/applications/{application_id}", 
+                                      headers=self.headers)
+            if response.status_code == 200:
+                print("Application withdrawn successfully!")
+                return True
+            else:
+                print(f"Failed to withdraw application. Status: {response.status_code}")
+                print(f"Error: {response.json().get('detail', 'Unknown error')}")
+                return False
+        except Exception as e:
+            print(f"Error withdrawing application: {str(e)}")
+            return False
+    
     def save_job(self, job_id, notes=None):
         if not self.token:
             print("Please login first.")
@@ -100,6 +146,48 @@ class CandidatePortal:
                 return False
         except Exception as e:
             print(f"Error saving job: {str(e)}")
+            return False
+    
+    def update_saved_job(self, saved_job_id, notes):
+        if not self.token:
+            print("Please login first.")
+            return False
+        
+        update_data = {"notes": notes}
+        
+        try:
+            # Using PATCH to update only specified fields
+            response = requests.patch(f"{BASE_URL}/saved-jobs/{saved_job_id}", 
+                                     headers=self.headers, 
+                                     json=update_data)
+            if response.status_code == 200:
+                print("Saved job updated successfully!")
+                return True
+            else:
+                print(f"Failed to update saved job. Status: {response.status_code}")
+                print(f"Error: {response.json().get('detail', 'Unknown error')}")
+                return False
+        except Exception as e:
+            print(f"Error updating saved job: {str(e)}")
+            return False
+    
+    def delete_saved_job(self, saved_job_id):
+        if not self.token:
+            print("Please login first.")
+            return False
+        
+        try:
+            response = requests.delete(f"{BASE_URL}/saved-jobs/{saved_job_id}", 
+                                      headers=self.headers)
+            if response.status_code == 200:
+                print("Saved job removed successfully!")
+                return True
+            else:
+                print(f"Failed to remove saved job. Status: {response.status_code}")
+                print(f"Error: {response.json().get('detail', 'Unknown error')}")
+                return False
+        except Exception as e:
+            print(f"Error removing saved job: {str(e)}")
             return False
     
     def get_applications(self):
@@ -214,10 +302,14 @@ def main():
         print("2. Apply for a Job")
         print("3. Save a Job")
         print("4. View My Applications")
-        print("5. View My Saved Jobs")
-        print("6. Exit")
+        print("5. Update an Application")
+        print("6. Withdraw an Application")
+        print("7. View My Saved Jobs")
+        print("8. Update a Saved Job")
+        print("9. Remove a Saved Job")
+        print("0. Exit")
         
-        choice = input("\nEnter your choice (1-6): ")
+        choice = input("\nEnter your choice (0-9): ")
         
         if choice == "1":
             jobs = portal.get_jobs()
@@ -270,10 +362,100 @@ def main():
             display_applications(applications)
         
         elif choice == "5":
+            applications = portal.get_applications()
+            display_applications(applications)
+            
+            if not applications:
+                continue
+                
+            app_index = input("\nEnter application number to update (or 0 to cancel): ")
+            if app_index.isdigit() and 0 < int(app_index) <= len(applications):
+                app = applications[int(app_index) - 1]
+                print(f"\nUpdating application for: {app['job_details'].get('title', 'Unknown Job')}")
+                
+                cover_letter = input("Enter new cover letter (leave blank to keep current): ")
+                notes = input("Enter new notes (leave blank to keep current): ")
+                
+                portal.update_application(
+                    application_id=app["id"],
+                    cover_letter=cover_letter if cover_letter else None,
+                    notes=notes if notes else None
+                )
+            elif app_index == "0":
+                print("Update cancelled.")
+            else:
+                print("Invalid application number.")
+        
+        elif choice == "6":
+            applications = portal.get_applications()
+            display_applications(applications)
+            
+            if not applications:
+                continue
+                
+            app_index = input("\nEnter application number to withdraw (or 0 to cancel): ")
+            if app_index.isdigit() and 0 < int(app_index) <= len(applications):
+                app = applications[int(app_index) - 1]
+                
+                confirm = input(f"Are you sure you want to withdraw application for {app['job_details'].get('title', 'Unknown Job')}? (y/n): ")
+                if confirm.lower() == 'y':
+                    portal.delete_application(app["id"])
+                else:
+                    print("Withdrawal cancelled.")
+            elif app_index == "0":
+                print("Withdrawal cancelled.")
+            else:
+                print("Invalid application number.")
+        
+        elif choice == "7":
             saved_jobs = portal.get_saved_jobs()
             display_saved_jobs(saved_jobs)
         
-        elif choice == "6":
+        elif choice == "8":
+            saved_jobs = portal.get_saved_jobs()
+            display_saved_jobs(saved_jobs)
+            
+            if not saved_jobs:
+                continue
+                
+            saved_index = input("\nEnter saved job number to update (or 0 to cancel): ")
+            if saved_index.isdigit() and 0 < int(saved_index) <= len(saved_jobs):
+                saved = saved_jobs[int(saved_index) - 1]
+                print(f"\nUpdating saved job: {saved['job_details'].get('title', 'Unknown Job')}")
+                
+                notes = input("Enter new notes: ")
+                
+                portal.update_saved_job(
+                    saved_job_id=saved["id"],
+                    notes=notes
+                )
+            elif saved_index == "0":
+                print("Update cancelled.")
+            else:
+                print("Invalid saved job number.")
+        
+        elif choice == "9":
+            saved_jobs = portal.get_saved_jobs()
+            display_saved_jobs(saved_jobs)
+            
+            if not saved_jobs:
+                continue
+                
+            saved_index = input("\nEnter saved job number to remove (or 0 to cancel): ")
+            if saved_index.isdigit() and 0 < int(saved_index) <= len(saved_jobs):
+                saved = saved_jobs[int(saved_index) - 1]
+                
+                confirm = input(f"Are you sure you want to remove saved job {saved['job_details'].get('title', 'Unknown Job')}? (y/n): ")
+                if confirm.lower() == 'y':
+                    portal.delete_saved_job(saved["id"])
+                else:
+                    print("Removal cancelled.")
+            elif saved_index == "0":
+                print("Removal cancelled.")
+            else:
+                print("Invalid saved job number.")
+        
+        elif choice == "0":
             print("Thank you for using the Candidate Job Portal. Goodbye!")
             break
         

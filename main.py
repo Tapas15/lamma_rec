@@ -95,7 +95,7 @@ async def register_candidate(user: CandidateCreate):
         existing_user = await Database.get_collection(USERS_COLLECTION).find_one({"email": user.email})
         if existing_user:
             raise HTTPException(status_code=400, detail="Email already registered")
-        
+    
         # Generate MongoDB ObjectId
         object_id = ObjectId()
         str_id = str(object_id)
@@ -103,47 +103,47 @@ async def register_candidate(user: CandidateCreate):
         
         # Create user document
         user_dict = {
-            "_id": object_id,
-            "id": str_id,
-            "email": user.email,
-            "password": pwd_context.hash(user.password),
-            "full_name": user.full_name,
-            "user_type": "candidate",
-            "created_at": current_time
+        "_id": object_id,
+        "id": str_id,
+        "email": user.email,
+        "password": pwd_context.hash(user.password),
+        "full_name": user.full_name,
+        "user_type": "candidate",
+        "created_at": current_time
         }
-        
+    
         # Insert into users collection
         await Database.get_collection(USERS_COLLECTION).insert_one(user_dict)
-        
+    
         # Create candidate profile with comprehensive fields
         candidate_dict = {
-            "_id": object_id,
-            "id": str_id,
-            "email": user.email,
-            "user_type": "candidate",
-            "full_name": user.full_name,
-            "created_at": current_time,
-            "skills": user.skills or [],
-            "experience": user.experience or "No experience provided",
-            "education": user.education or "No education details provided",
-            "location": user.location or "Location not specified",
-            "bio": user.bio or "No bio provided",
-            # Add additional candidate-specific fields
-            "profile_completed": True,
-            "is_active": True,
-            "last_active": current_time,
-            "resume_url": None,
-            "profile_visibility": "public",
-            "job_preferences": {
-                "job_types": [],
-                "preferred_locations": [],
-                "salary_expectation": None,
-                "remote_work": True
-            },
-            "profile_views": 0,
-            "job_applications": [],
-            "saved_jobs": [],
-            "match_score_threshold": 70  # minimum match score for job recommendations
+        "_id": object_id,
+        "id": str_id,
+        "email": user.email,
+        "user_type": "candidate",
+        "full_name": user.full_name,
+        "created_at": current_time,
+        "skills": user.skills or [],
+        "experience": user.experience or "No experience provided",
+        "education": user.education or "No education details provided",
+        "location": user.location or "Location not specified",
+        "bio": user.bio or "No bio provided",
+        # Add additional candidate-specific fields
+        "profile_completed": True,
+        "is_active": True,
+        "last_active": current_time,
+        "resume_url": None,
+        "profile_visibility": "public",
+        "job_preferences": {
+        "job_types": [],
+        "preferred_locations": [],
+        "salary_expectation": None,
+        "remote_work": True
+        },
+        "profile_views": 0,
+        "job_applications": [],
+        "saved_jobs": [],
+        "match_score_threshold": 70  # minimum match score for job recommendations
         }
         
         # Insert into candidates collection
@@ -153,7 +153,7 @@ async def register_candidate(user: CandidateCreate):
         candidate_dict.pop("_id", None)
         
         return candidate_dict
-        
+    
     except Exception as e:
         print(f"Error in register_candidate: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to register candidate")
@@ -182,7 +182,7 @@ async def register_employer(user: EmployerCreate):
         existing_user = await Database.get_collection(USERS_COLLECTION).find_one({"email": user.email})
         if existing_user:
             raise HTTPException(status_code=400, detail="Email already registered")
-        
+    
         # Generate MongoDB ObjectId
         object_id = ObjectId()
         str_id = str(object_id)
@@ -190,57 +190,57 @@ async def register_employer(user: EmployerCreate):
         
         # Create user document
         user_dict = {
-            "_id": object_id,
-            "id": str_id,
-            "email": user.email,
-            "password": pwd_context.hash(user.password),
-            "full_name": user.full_name,
-            "user_type": "employer",
-            "created_at": current_time
+        "_id": object_id,
+        "id": str_id,
+        "email": user.email,
+        "password": pwd_context.hash(user.password),
+        "full_name": user.full_name,
+        "user_type": "employer",
+        "created_at": current_time
         }
-        
+    
         # Insert into users collection
         await Database.get_collection(USERS_COLLECTION).insert_one(user_dict)
-        
+    
         # Create employer profile with all fields
         employer_dict = {
-            "_id": object_id,
-            "id": str_id,
-            "email": user.email,
-            "user_type": "employer",
-            "full_name": user.full_name,
-            "company_name": user.company_name,
-            "company_description": user.company_description or "Company description not provided",
-            "company_website": user.company_website or "Website not provided",
-            "company_location": user.company_location or "Location not specified",
-            "company_size": user.company_size or "Company size not specified",
-            "industry": user.industry or "Industry not specified",
-            "contact_email": user.contact_email or user.email,
-            "contact_phone": user.contact_phone or "Phone not provided",
-            "location": user.location or user.company_location or "Location not specified",
-            "bio": user.bio or "Bio not provided",
-            "created_at": current_time,
-            # Add additional employer-specific fields with default values
-            "profile_completed": True,
-            "is_active": True,
-            "last_active": current_time,
-            "verified": False,  # Default to False, can be verified later
-            "total_jobs_posted": 0,
-            "total_active_jobs": 0,
-            "account_type": "standard",  # Can be used for different subscription levels
-            "profile_views": 0,
-            "rating": None,  # Can be used for employer ratings
-            "social_links": {
-                "linkedin": user.linkedin or "",
-                "twitter": user.twitter or "",
-                "website": user.company_website or ""
-            },
-            "posted_jobs": []
+        "_id": object_id,
+        "id": str_id,
+        "email": user.email,
+        "user_type": "employer",
+        "full_name": user.full_name,
+        "company_name": user.company_name,
+        "company_description": user.company_description or "Company description not provided",
+        "company_website": user.company_website or "Website not provided",
+        "company_location": user.company_location or "Location not specified",
+        "company_size": user.company_size or "Company size not specified",
+        "industry": user.industry or "Industry not specified",
+        "contact_email": user.contact_email or user.email,
+        "contact_phone": user.contact_phone or "Phone not provided",
+        "location": user.location or user.company_location or "Location not specified",
+        "bio": user.bio or "Bio not provided",
+        "created_at": current_time,
+        # Add additional employer-specific fields with default values
+        "profile_completed": True,
+        "is_active": True,
+        "last_active": current_time,
+        "verified": False,  # Default to False, can be verified later
+        "total_jobs_posted": 0,
+        "total_active_jobs": 0,
+        "account_type": "standard",  # Can be used for different subscription levels
+        "profile_views": 0,
+        "rating": None,  # Can be used for employer ratings
+        "social_links": {
+        "linkedin": user.linkedin or "",
+        "twitter": user.twitter or "",
+        "website": user.company_website or ""
+        },
+        "posted_jobs": []
         }
-        
+    
         # Insert into employers collection
         await Database.get_collection(EMPLOYERS_COLLECTION).insert_one(employer_dict)
-        
+    
         # Remove sensitive fields for response
         # Password is not in employer_dict, it's in user_dict which is not directly returned.
         # _id is specific to MongoDB and usually not exposed directly if 'id' (string version) is used.
@@ -248,7 +248,7 @@ async def register_employer(user: EmployerCreate):
         clean_employer_dict.pop("_id", None) 
         
         return clean_employer_dict
-        
+    
     except Exception as e:
         print(f"Error in register_employer: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to register employer")
@@ -352,6 +352,59 @@ async def delete_job(
         )
     
     return {"message": "Job deleted successfully"}
+
+@app.patch("/jobs/{job_id}", response_model=Job)
+async def update_job(
+    job_id: str,
+    update_data: dict,
+    current_user: dict = Depends(get_current_user)
+):
+    # Verify user is an employer
+    if current_user["user_type"] != UserType.EMPLOYER:
+        raise HTTPException(
+            status_code=403,
+            detail="Only employers can update jobs"
+        )
+    
+    # Get the job
+    job = await Database.get_collection(JOBS_COLLECTION).find_one({"id": job_id})
+    if not job:
+        raise HTTPException(
+            status_code=404,
+            detail="Job not found"
+        )
+    
+    # Verify the job belongs to this employer
+    if str(job["employer_id"]) != str(current_user["id"]):
+        raise HTTPException(
+            status_code=403,
+            detail="You can only update your own jobs"
+        )
+    
+    # Update the job
+    result = await Database.get_collection(JOBS_COLLECTION).update_one(
+        {"id": job_id},
+        {"$set": update_data}
+    )
+    
+    if result.modified_count == 0:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to update job or no changes made"
+        )
+    
+    # Return updated job
+    updated_job = await Database.get_collection(JOBS_COLLECTION).find_one({"id": job_id})
+    if not updated_job:
+        raise HTTPException(
+            status_code=404,
+            detail="Job not found after update"
+        )
+    
+    # Remove MongoDB's _id
+    updated_job.pop("_id", None)
+    
+    return updated_job
 
 # Project endpoints
 @app.post("/projects", response_model=Project, status_code=status.HTTP_201_CREATED)
@@ -494,8 +547,14 @@ async def get_candidate_recommendations(job_id: str, current_user: dict = Depend
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     
-    candidates = await Database.get_collection(CANDIDATES_COLLECTION).find().to_list(length=None)
+    # Make sure to only get active candidates with complete profiles
+    candidates = await Database.get_collection(CANDIDATES_COLLECTION).find({
+        "is_active": True,
+        "profile_completed": True
+    }).to_list(length=None)
+    
     if not candidates:
+        print(f"No active candidates found for job {job_id}")
         return []
     
     recommendations = recommender.get_job_candidate_matches(job, candidates)
@@ -505,6 +564,10 @@ async def get_candidate_recommendations(job_id: str, current_user: dict = Depend
     for rec in recommendations:
         candidate = next((c for c in candidates if c["id"] == rec["candidate_id"]), None)
         if candidate:
+            # Remove MongoDB's _id from candidate
+            if "_id" in candidate:
+                candidate.pop("_id", None)
+                
             rec_with_details = rec.copy()
             rec_with_details["candidate"] = candidate
             detailed_recommendations.append(rec_with_details)
@@ -591,6 +654,13 @@ async def delete_user(current_user: dict = Depends(get_current_user)):
             )
             if jobs_result.deleted_count > 0:
                 print(f"Deleted {jobs_result.deleted_count} jobs posted by employer {current_user['email']}")
+            
+            # Delete all projects posted by this employer
+            projects_result = await Database.get_collection(PROJECTS_COLLECTION).delete_many(
+                {"employer_id": current_user["id"]}
+            )
+            if projects_result.deleted_count > 0:
+                print(f"Deleted {projects_result.deleted_count} projects posted by employer {current_user['email']}")
         
         return {"message": "User and associated profiles deleted successfully"}
         
@@ -724,6 +794,67 @@ async def withdraw_application(application_id: str, current_user: dict = Depends
         print(f"Error in withdraw_application: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to withdraw application")
 
+@app.patch("/applications/{application_id}", response_model=JobApplication)
+async def update_application(
+    application_id: str, 
+    update_data: dict, 
+    current_user: dict = Depends(get_current_user)
+):
+    try:
+        if current_user["user_type"] != UserType.CANDIDATE:
+            raise HTTPException(status_code=403, detail="Only candidates can update applications")
+        
+        # Check if the application exists and belongs to this candidate
+        application = await Database.get_collection(JOB_APPLICATIONS_COLLECTION).find_one({
+            "id": application_id,
+            "candidate_id": current_user["id"]
+        })
+        
+        if not application:
+            raise HTTPException(status_code=404, detail="Application not found or does not belong to you")
+        
+        # Only allow updating certain fields
+        allowed_fields = ["cover_letter", "notes", "resume_url"]
+        update_dict = {k: v for k, v in update_data.items() if k in allowed_fields}
+        
+        if not update_dict:
+            raise HTTPException(status_code=400, detail="No valid fields to update")
+        
+        # Add last_updated timestamp
+        update_dict["last_updated"] = datetime.utcnow()
+        
+        # Update the application
+        result = await Database.get_collection(JOB_APPLICATIONS_COLLECTION).update_one(
+            {"id": application_id},
+            {"$set": update_dict}
+        )
+        
+        if result.modified_count == 0:
+            raise HTTPException(status_code=500, detail="Failed to update application")
+        
+        # Get updated application
+        updated_application = await Database.get_collection(JOB_APPLICATIONS_COLLECTION).find_one({"id": application_id})
+        if not updated_application:
+            raise HTTPException(status_code=404, detail="Application not found after update")
+        
+        # Remove MongoDB's _id
+        updated_application.pop("_id", None)
+        
+        # Get job details
+        job = await Database.get_collection(JOBS_COLLECTION).find_one({"id": updated_application["job_id"]})
+        if job:
+            updated_application["job_details"] = {
+                "title": job.get("title"),
+                "company": job.get("company"),
+                "location": job.get("location")
+            }
+        
+        return updated_application
+    
+    except Exception as e:
+        print(f"Error in update_application: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to update application")
+
 # Saved jobs endpoints
 @app.post("/saved-jobs", response_model=SavedJob)
 async def save_job(saved_job: SavedJobCreate, current_user: dict = Depends(get_current_user)):
@@ -820,6 +951,63 @@ async def remove_saved_job(saved_job_id: str, current_user: dict = Depends(get_c
     except Exception as e:
         print(f"Error in remove_saved_job: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to remove saved job")
+
+@app.patch("/saved-jobs/{saved_job_id}", response_model=SavedJob)
+async def update_saved_job(
+    saved_job_id: str, 
+    update_data: dict, 
+    current_user: dict = Depends(get_current_user)
+):
+    try:
+        if current_user["user_type"] != UserType.CANDIDATE:
+            raise HTTPException(status_code=403, detail="Only candidates can update saved jobs")
+        
+        # Check if the saved job exists and belongs to this candidate
+        saved_job = await Database.get_collection(SAVED_JOBS_COLLECTION).find_one({
+            "id": saved_job_id,
+            "candidate_id": current_user["id"]
+        })
+        
+        if not saved_job:
+            raise HTTPException(status_code=404, detail="Saved job not found or does not belong to you")
+        
+        # Only allow updating notes field
+        if "notes" not in update_data:
+            raise HTTPException(status_code=400, detail="Notes field is required for update")
+        
+        update_dict = {"notes": update_data["notes"]}
+        
+        # Update the saved job
+        result = await Database.get_collection(SAVED_JOBS_COLLECTION).update_one(
+            {"id": saved_job_id},
+            {"$set": update_dict}
+        )
+        
+        if result.modified_count == 0:
+            raise HTTPException(status_code=500, detail="Failed to update saved job")
+        
+        # Get updated saved job
+        updated_saved_job = await Database.get_collection(SAVED_JOBS_COLLECTION).find_one({"id": saved_job_id})
+        if not updated_saved_job:
+            raise HTTPException(status_code=404, detail="Saved job not found after update")
+        
+        # Remove MongoDB's _id
+        updated_saved_job.pop("_id", None)
+        
+        # Get job details
+        job = await Database.get_collection(JOBS_COLLECTION).find_one({"id": updated_saved_job["job_id"]})
+        if job:
+            updated_saved_job["job_details"] = {
+                "title": job.get("title"),
+                "company": job.get("company"),
+                "location": job.get("location")
+            }
+        
+        return updated_saved_job
+    
+    except Exception as e:
+        print(f"Error in update_saved_job: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to update saved job")
 
 if __name__ == "__main__":
     import uvicorn
