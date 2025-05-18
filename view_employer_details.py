@@ -117,16 +117,62 @@ def view_employer_details():
         
         # Step 4: Get employer's projects
         print("\nFetching employer projects...")
-        projects_response = requests.get(f"{BASE_URL}/employer/projects", headers=headers)
-        if projects_response.status_code == 200:
-            projects = projects_response.json()
-            if projects:
-                print_json(f"Active Projects ({len(projects)} projects)", projects)
+        try:
+            # First, try to access all projects to see if that works
+            all_projects_response = requests.get(f"{BASE_URL}/projects", headers=headers)
+            print(f"All projects endpoint status: {all_projects_response.status_code}")
+            
+            # Now try the employer projects endpoint
+            projects_response = requests.get(f"{BASE_URL}/employer/projects", headers=headers)
+            print(f"Employer projects endpoint status: {projects_response.status_code}")
+            
+            if projects_response.status_code == 200:
+                projects = projects_response.json()
+                if projects:
+                    print_json(f"Active Projects ({len(projects)} projects)", projects)
+                else:
+                    print("\nNo active projects found for this employer.")
+                    # Create a test project to ensure functionality works
+                    print("\nCreating a test project...")
+                    project_data = {
+                        "title": "Test Project",
+                        "company": employer_data.get("company_name", "Sample Company"),
+                        "description": "This is a test project to verify the projects endpoint.",
+                        "requirements": ["Test", "Verify"],
+                        "budget_range": "$1,000 - $2,000",
+                        "duration": "1 week",
+                        "location": "Remote",
+                        "project_type": "Test",
+                        "skills_required": ["Testing", "Debugging"],
+                        "employer_id": employer_id
+                    }
+                    create_response = requests.post(f"{BASE_URL}/projects", headers=headers, json=project_data)
+                    print(f"Project creation status: {create_response.status_code}")
+                    if create_response.status_code in [200, 201]:
+                        print("✅ Test project created successfully")
+                        print("\nFetching projects again...")
+                        projects_response = requests.get(f"{BASE_URL}/employer/projects", headers=headers)
+                        if projects_response.status_code == 200:
+                            projects = projects_response.json()
+                            if projects:
+                                print_json(f"Projects after creation ({len(projects)} projects)", projects)
+                            else:
+                                print("\nStill no projects found after creation attempt.")
+                    else:
+                        print("❌ Failed to create test project")
+                        print_json("Error", create_response.json() if create_response.content else "No content")
             else:
-                print("\nNo active projects found.")
-        else:
-            print(f"Error getting projects. Status code: {projects_response.status_code}")
-            print("Response:", projects_response.text)
+                print(f"Error getting projects. Status code: {projects_response.status_code}")
+                print("Response:", projects_response.text)
+                
+                # Debug information
+                print("\nDebugging information:")
+                print(f"Employer ID: {employer_id}")
+                print(f"Authorization header: Bearer {token[:10]}...")
+        except Exception as e:
+            print(f"Error in projects endpoint: {str(e)}")
+            import traceback
+            print(traceback.format_exc())
                 
     except requests.exceptions.ConnectionError:
         print("\nError: Could not connect to the server. Make sure the FastAPI server is running on http://localhost:8000")

@@ -100,7 +100,7 @@ async def register_candidate(user: CandidateCreate):
         object_id = ObjectId()
         str_id = str(object_id)
         current_time = datetime.utcnow()
-        
+    
         # Create user document
         user_dict = {
         "_id": object_id,
@@ -148,7 +148,7 @@ async def register_candidate(user: CandidateCreate):
         
         # Insert into candidates collection
         await Database.get_collection(CANDIDATES_COLLECTION).insert_one(candidate_dict)
-        
+    
         # Remove sensitive fields for response
         candidate_dict.pop("_id", None)
         
@@ -187,7 +187,7 @@ async def register_employer(user: EmployerCreate):
         object_id = ObjectId()
         str_id = str(object_id)
         current_time = datetime.utcnow()
-        
+    
         # Create user document
         user_dict = {
         "_id": object_id,
@@ -415,11 +415,32 @@ async def create_project(project: ProjectCreate, current_user: dict = Depends(ge
     try:
         # Convert project to dict and add required fields
         project_dict = project.dict()
-        project_dict["id"] = str(ObjectId())
+        
+        # Generate a unique ID
+        project_id = str(ObjectId())
+        project_dict["id"] = project_id
         project_dict["created_at"] = datetime.utcnow()
         project_dict["is_active"] = True
         project_dict["status"] = "open"
         project_dict["employer_id"] = current_user["id"]
+        
+        print(f"DEBUG - Creating project: employer_id={current_user['id']}, title={project_dict['title']}, id={project_id}")
+        
+        # Validate required fields
+        required_fields = ["title", "company", "description", "requirements", "project_type", "skills_required"]
+        missing_fields = [field for field in required_fields if field not in project_dict or not project_dict[field]]
+        
+        if missing_fields:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Missing required fields: {', '.join(missing_fields)}"
+            )
+            
+        # Ensure list fields are actually lists
+        list_fields = ["requirements", "skills_required"]
+        for field in list_fields:
+            if field in project_dict and not isinstance(project_dict[field], list):
+                project_dict[field] = [project_dict[field]]  # Convert to list if it's not already
         
         # Remove any None values to prevent null constraints
         project_dict = {k: v for k, v in project_dict.items() if v is not None}
@@ -430,12 +451,25 @@ async def create_project(project: ProjectCreate, current_user: dict = Depends(ge
         # Fetch and return the created project
         created_project = await Database.get_collection(PROJECTS_COLLECTION).find_one({"id": project_dict["id"]})
         if not created_project:
-            raise HTTPException(status_code=500, detail="Failed to create project")
+            print("DEBUG - Project not found after creation!")
+            # Try using ObjectId directly as a fallback
+            created_project = await Database.get_collection(PROJECTS_COLLECTION).find_one({"id": project_id})
+            if not created_project:
+                raise HTTPException(status_code=500, detail="Failed to create project - cannot find it after creation")
             
+        # Remove MongoDB's _id
+        if "_id" in created_project:
+            created_project.pop("_id", None)
+            
+        print(f"DEBUG - Project created successfully: id={created_project['id']}")
         return created_project
         
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error creating project: {str(e)}")  # Log the error
+        import traceback
+        print(traceback.format_exc())
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create project: {str(e)}"
@@ -443,23 +477,156 @@ async def create_project(project: ProjectCreate, current_user: dict = Depends(ge
 
 @app.get("/projects", response_model=List[Project])
 async def get_projects(status: Optional[str] = None, current_user: dict = Depends(get_current_user)):
-    query = {"is_active": True}
-    if status:
-        query["status"] = status
-    
-    projects = await Database.get_collection("projects").find(query).to_list(length=None)
-    return projects
+    print(f"DEBUG: get_projects called with status={status}")
+    try:
+        # Start with a base query
+        query = {}
+        
+        # Only add filters if provided
+        if status:
+            print(f"DEBUG: Filtering by status: {status}")
+            # Validate status
+            valid_statuses = ["open", "in_progress", "completed", "cancelled"]
+            if status not in valid_statuses:
+                raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {', '.join(valid_statuses)}")
+            query["status"] = status
+        
+        # Get all projects
+        print(f"DEBUG: Query for all projects = {query}")
+        projects = await Database.get_collection(PROJECTS_COLLECTION).find(query).to_list(length=None)
+        print(f"DEBUG: Found {len(projects)} projects")
+        
+        # Process projects - remove _id and handle missing fields
+        clean_projects = []
+        required_fields = ["id", "title", "company", "description", "requirements", "employer_id", "is_active", "status", "project_type", "skills_required"]
+        
+        for project in projects:
+            # Remove MongoDB's _id
+            if "_id" in project:
+                project.pop("_id", None)
+                
+            # Fill in any missing required fields
+            for field in required_fields:
+                if field not in project:
+                    print(f"DEBUG: Project {project.get('id')} missing required field '{field}'")
+                    if field in ["requirements", "skills_required"]:
+                        project[field] = []
+                    elif field in ["is_active"]:
+                        project[field] = True
+                    elif field in ["status"]:
+                        project[field] = "open"
+                    else:
+                        project[field] = f"[Missing {field}]"
+                        
+            clean_projects.append(project)
+            
+        print(f"DEBUG: Returning {len(clean_projects)} projects")
+        return clean_projects
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ERROR in get_projects: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve projects: {str(e)}")
 
-@app.get("/employer/projects", response_model=List[Project])
-async def get_employer_projects(current_user: dict = Depends(get_current_user)):
-    if current_user["user_type"] != UserType.EMPLOYER:
-        raise HTTPException(status_code=403, detail="Only employers can view their projects")
-    
-    projects = await Database.get_collection("projects").find({
-        "employer_id": current_user["id"],
-        "is_active": True
-    }).to_list(length=None)
-    return projects
+@app.get("/employer-projects", response_model=List[Project])
+async def get_current_employer_projects(current_user: dict = Depends(get_current_user)):
+    """Get projects posted by the current employer using a different endpoint path"""
+    try:
+        # Check if user is an employer
+        if current_user.get("user_type") != "employer":
+            raise HTTPException(status_code=403, detail="Only employers can view their projects")
+        
+        employer_id = current_user.get("id")
+        if not employer_id:
+            raise HTTPException(status_code=400, detail="Invalid employer ID")
+        
+        print(f"DEBUG: Finding projects for employer_id: {employer_id}")
+        
+        # Find all projects for this employer
+        projects_cursor = Database.get_collection(PROJECTS_COLLECTION).find({"employer_id": employer_id})
+        projects = await projects_cursor.to_list(length=None)
+        
+        print(f"DEBUG: Found {len(projects)} projects")
+        
+        # Clean up projects before returning
+        result_projects = []
+        for project in projects:
+            if "_id" in project:
+                project.pop("_id", None)
+            result_projects.append(project)
+        
+        return result_projects
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ERROR in get_current_employer_projects: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.get("/projects/{project_id}", response_model=Project)
+async def get_project(project_id: str, current_user: dict = Depends(get_current_user)):
+    """Get details of a specific project"""
+    print(f"DEBUG: get_project called for project_id={project_id}, user={current_user.get('id')}")
+    try:
+        # Get the project
+        print(f"DEBUG: Attempting to find project with id={project_id}")
+        project = await Database.get_collection(PROJECTS_COLLECTION).find_one({"id": project_id})
+        print(f"DEBUG: Project found? {'Yes' if project else 'No'}")
+        print(f"DEBUG: Project data: {project}")
+        
+        if not project:
+            print(f"DEBUG: Project with id={project_id} not found")
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        # Remove MongoDB's _id
+        if "_id" in project:
+            project.pop("_id", None)
+            print("DEBUG: Removed _id from project")
+            
+        # Ensure all required fields are present
+        required_fields = ["id", "title", "company", "description", "requirements", "employer_id", "is_active", "status", "project_type", "skills_required"]
+        for field in required_fields:
+            if field not in project:
+                print(f"DEBUG: Required field '{field}' missing from project")
+                if field in ["requirements", "skills_required"]:
+                    project[field] = []
+                elif field in ["is_active"]:
+                    project[field] = True
+                elif field in ["status"]:
+                    project[field] = "open"
+                else:
+                    project[field] = f"[Missing {field}]"
+            
+        print(f"DEBUG: Project details: id={project.get('id')}, title={project.get('title')}")
+        
+        # If user is an employer, verify they own this project or return limited info
+        if current_user["user_type"] == UserType.EMPLOYER:
+            # Allow full access for project owners
+            if project["employer_id"] == current_user["id"]:
+                print("DEBUG: User is the project owner")
+                return project
+            else:
+                print(f"DEBUG: User is not owner. Project owner={project.get('employer_id')}, User={current_user.get('id')}")
+        
+        # For non-owner employers and candidates, only return project if it's active
+        if not project.get("is_active", False):
+            print(f"DEBUG: Project is not active, returning 404")
+            raise HTTPException(status_code=404, detail="Project not found or inactive")
+        
+        print("DEBUG: Returning project to non-owner")
+        return project
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ERROR in get_project: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 @app.patch("/projects/{project_id}", response_model=Project)
 async def update_project_status(
@@ -467,59 +634,137 @@ async def update_project_status(
     update_data: dict,
     current_user: dict = Depends(get_current_user)
 ):
+    """Update a project's details or status"""
+    print(f"DEBUG: update_project_status called for project_id={project_id}, user={current_user.get('id')}")
     if current_user["user_type"] != UserType.EMPLOYER:
         raise HTTPException(status_code=403, detail="Only employers can update projects")
     
-    # Get the project
-    project = await Database.get_collection("projects").find_one({"id": project_id})
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    
-    # Verify the project belongs to this employer
-    if project["employer_id"] != current_user["id"]:
-        raise HTTPException(status_code=403, detail="You can only update your own projects")
-    
-    # Validate status
-    valid_statuses = ["open", "in_progress", "completed", "cancelled"]
-    if "status" in update_data and update_data["status"] not in valid_statuses:
-        raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {', '.join(valid_statuses)}")
-    
-    # Update the project
-    result = await Database.get_collection("projects").update_one(
-        {"id": project_id},
-        {"$set": update_data}
-    )
-    
-    if result.modified_count == 0:
-        raise HTTPException(status_code=500, detail="Failed to update project")
-    
-    # Return updated project
-    updated_project = await Database.get_collection("projects").find_one({"id": project_id})
-    return updated_project
+    try:
+        # Get the project
+        print(f"DEBUG: Attempting to find project with id={project_id}")
+        project = await Database.get_collection(PROJECTS_COLLECTION).find_one({"id": project_id})
+        print(f"DEBUG: Project data: {project}")
+        
+        if not project:
+            print(f"DEBUG: Project with id={project_id} not found")
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        # Verify the project belongs to this employer
+        if project["employer_id"] != current_user["id"]:
+            print(f"DEBUG: User is not project owner. Project owner={project.get('employer_id')}, User={current_user.get('id')}")
+            raise HTTPException(status_code=403, detail="You can only update your own projects")
+        
+        # Validate status if it's being updated
+        if "status" in update_data:
+            print(f"DEBUG: Validating status: {update_data['status']}")
+            valid_statuses = ["open", "in_progress", "completed", "cancelled"]
+            if update_data["status"] not in valid_statuses:
+                raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {', '.join(valid_statuses)}")
+        
+        # Remove any invalid fields from update_data
+        allowed_fields = ["status", "description", "title", "requirements", "budget_range", "duration", "location", "skills_required", "is_active"]
+        invalid_fields = [key for key in update_data.keys() if key not in allowed_fields]
+        for field in invalid_fields:
+            print(f"DEBUG: Removing invalid field from update: {field}")
+            update_data.pop(field, None)
+            
+        # Don't allow updating employer_id
+        if "employer_id" in update_data:
+            update_data.pop("employer_id", None)
+            
+        # Add updated timestamp
+        update_data["last_updated"] = datetime.utcnow()
+        print(f"DEBUG: Update data: {update_data}")
+        
+        # Update the project
+        result = await Database.get_collection(PROJECTS_COLLECTION).update_one(
+            {"id": project_id},
+            {"$set": update_data}
+        )
+        print(f"DEBUG: Update result: matched={result.matched_count}, modified={result.modified_count}")
+        
+        if result.matched_count == 0:
+            print("DEBUG: No documents were matched")
+            raise HTTPException(status_code=404, detail="Project not found") 
+        
+        # Return updated project
+        updated_project = await Database.get_collection(PROJECTS_COLLECTION).find_one({"id": project_id})
+        if not updated_project:
+            print("DEBUG: Could not find updated project")
+            raise HTTPException(status_code=404, detail="Project not found after update")
+        
+        if "_id" in updated_project:
+            updated_project.pop("_id", None)
+        
+        print(f"DEBUG: Project updated successfully: {project_id}")    
+        return updated_project
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ERROR in update_project_status: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Failed to update project: {str(e)}")
 
 @app.delete("/projects/{project_id}")
 async def delete_project(
     project_id: str,
     current_user: dict = Depends(get_current_user)
 ):
+    """Delete a project"""
+    print(f"DEBUG: delete_project called for project_id={project_id}, user={current_user.get('id')}")
     if current_user["user_type"] != UserType.EMPLOYER:
         raise HTTPException(status_code=403, detail="Only employers can delete projects")
     
-    # Get the project
-    project = await Database.get_collection("projects").find_one({"id": project_id})
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    
-    # Verify the project belongs to this employer
-    if project["employer_id"] != current_user["id"]:
-        raise HTTPException(status_code=403, detail="You can only delete your own projects")
-    
-    # Delete the project
-    result = await Database.get_collection("projects").delete_one({"id": project_id})
-    if result.deleted_count == 0:
-        raise HTTPException(status_code=500, detail="Failed to delete project")
-    
-    return {"message": "Project deleted successfully"}
+    try:
+        # Get the project
+        print(f"DEBUG: Attempting to find project with id={project_id}")
+        project = await Database.get_collection(PROJECTS_COLLECTION).find_one({"id": project_id})
+        print(f"DEBUG: Project found? {'Yes' if project else 'No'}")
+        
+        if not project:
+            print(f"DEBUG: Project with id={project_id} not found")
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        # Verify the project belongs to this employer
+        if project["employer_id"] != current_user["id"]:
+            print(f"DEBUG: User is not project owner. Project owner={project.get('employer_id')}, User={current_user.get('id')}")
+            raise HTTPException(status_code=403, detail="You can only delete your own projects")
+        
+        # Delete the project
+        print(f"DEBUG: Deleting project with id={project_id}")
+        result = await Database.get_collection(PROJECTS_COLLECTION).delete_one({"id": project_id})
+        print(f"DEBUG: Delete result: deleted count={result.deleted_count}")
+        
+        if result.deleted_count == 0:
+            print("DEBUG: No documents were deleted")
+            # Even though we found it earlier, it might have been deleted concurrently or there might be an issue with the ID format
+            # Check again to differentiate between "project doesn't exist" and "failed to delete"
+            exists_check = await Database.get_collection(PROJECTS_COLLECTION).find_one({"id": project_id})
+            if exists_check:
+                # It still exists, so deletion failed
+                raise HTTPException(status_code=500, detail="Failed to delete project")
+            else:
+                # It's already gone
+                return {"message": "Project already deleted", "id": project_id}
+        
+        print(f"DEBUG: Project deleted successfully: {project_id}")
+        
+        # Verify the project is really gone
+        verify = await Database.get_collection(PROJECTS_COLLECTION).find_one({"id": project_id})
+        if verify:
+            print(f"WARNING: Project still exists after deletion: {project_id}")
+            
+        return {"message": "Project deleted successfully", "id": project_id}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"ERROR in delete_project: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Failed to delete project: {str(e)}")
 
 # Recommendation endpoints
 @app.get("/recommendations/jobs", response_model=List[dict])
