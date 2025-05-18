@@ -187,7 +187,7 @@ async def register_employer(user: EmployerCreate):
         # Check if user already exists
         existing_user = await Database.get_collection(USERS_COLLECTION).find_one({"email": user.email})
         if existing_user:
-          raise HTTPException(status_code=400, detail="Email already registered")
+            raise HTTPException(status_code=400, detail="Email already registered")
     
         # Generate MongoDB ObjectId
         object_id = ObjectId()
@@ -677,12 +677,12 @@ async def update_project_status(
         if not project:
             print(f"DEBUG: Project with id={project_id} not found")
             raise HTTPException(status_code=404, detail="Project not found")
-        
+    
         # Verify the project belongs to this employer
         if project["employer_id"] != current_user["id"]:
             print(f"DEBUG: User is not project owner. Project owner={project.get('employer_id')}, User={current_user.get('id')}")
             raise HTTPException(status_code=403, detail="You can only update your own projects")
-        
+    
         # Validate status if it's being updated
         if "status" in update_data:
             print(f"DEBUG: Validating status: {update_data['status']}")
@@ -769,12 +769,12 @@ async def delete_project(
         if not project:
             print(f"DEBUG: Project with id={project_id} not found")
             raise HTTPException(status_code=404, detail="Project not found")
-        
+    
         # Verify the project belongs to this employer
         if project["employer_id"] != current_user["id"]:
             print(f"DEBUG: User is not project owner. Project owner={project.get('employer_id')}, User={current_user.get('id')}")
             raise HTTPException(status_code=403, detail="You can only delete your own projects")
-        
+    
         # Delete the project
         print(f"DEBUG: Deleting project with id={project_id}")
         result = await Database.get_collection(PROJECTS_COLLECTION).delete_one({"id": project_id})
