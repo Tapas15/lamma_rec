@@ -3,18 +3,177 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
-from typing import List, Optional, Union, Dict, Any
+from typing import List, Optional, Union, Dict, Any, Tuple
 import os
 from dotenv import load_dotenv
 from bson import ObjectId
 import requests
 import numpy as np
+import time
+import re
 
 from models import *
 from database import Database, USERS_COLLECTION, JOBS_COLLECTION, RECOMMENDATIONS_COLLECTION, CANDIDATES_COLLECTION, EMPLOYERS_COLLECTION, PROJECTS_COLLECTION, JOB_APPLICATIONS_COLLECTION, SAVED_JOBS_COLLECTION, init_db
-from lamma.llama_recommender import LlamaRecommender
 
 load_dotenv()
+
+# Define LlamaRecommender class to use embeddings for recommendations
+class LlamaRecommender:
+    def __init__(self, model_name: str = "llama3.2:latest"):
+        self.model_name = model_name
+        self.ollama_url = "http://localhost:11434/api/generate"
+        self.ollama_available = True
+        print(f"Using Ollama model: {model_name}")
+
+        try:
+            response = requests.get("http://localhost:11434/api/tags")
+            if response.status_code == 200:
+                models = response.json().get("models", [])
+                if not any(model["name"] == model_name for model in models):
+                    print(f"Warning: Model {model_name} not found. Available models: {[m['name'] for m in models]}")
+            else:
+                print("Warning: Could not verify available models")
+                self.ollama_available = False
+        except requests.exceptions.ConnectionError:
+            print("Error: Could not connect to Ollama. Will use fallback scoring mechanism.")
+            self.ollama_available = False
+    
+    def get_match_score(self, job_info: Dict, candidate_info: Dict) -> Tuple[float, str]:
+        """Calculate match score between a job and candidate using embeddings"""
+        try:
+            # Create job and candidate embeddings
+            job_text = f"{job_info.get('title', '')} {job_info.get('company', '')} {job_info.get('description', '')} {' '.join(job_info.get('requirements', []))}"
+            candidate_text = f"{candidate_info.get('full_name', '')} {' '.join(candidate_info.get('skills', []))} {candidate_info.get('experience', '')} {candidate_info.get('education', '')}"
+            
+            job_embedding = get_embedding(job_text)
+            candidate_embedding = get_embedding(candidate_text)
+            
+            if not job_embedding or not candidate_embedding:
+                return self._calculate_fallback_score(job_info, candidate_info)
+            
+            # Calculate cosine similarity
+            similarity = self._cosine_similarity(job_embedding, candidate_embedding)
+            
+            # Scale to 0-100 score
+            score = min(100, max(0, similarity * 100))
+            
+            # Generate explanation
+            required_skills = set(job_info.get("requirements", []))
+            if not required_skills:
+                required_skills = set(job_info.get("skills_required", []))
+                
+            candidate_skills = set(candidate_info.get("skills", []))
+            matched_skills = required_skills.intersection(candidate_skills)
+            
+            explanation = f"Semantic match score: {score:.1f}. "
+            if matched_skills:
+                explanation += f"Matching skills: {', '.join(matched_skills)}. "
+            if required_skills - matched_skills:
+                explanation += f"Missing skills: {', '.join(required_skills - matched_skills)}. "
+            
+            return score, explanation
+        except Exception as e:
+            print(f"Error in get_match_score: {str(e)}")
+            return self._calculate_fallback_score(job_info, candidate_info)
+    
+    def _cosine_similarity(self, vec1, vec2):
+        """Calculate cosine similarity between two vectors"""
+        if not vec1 or not vec2:
+            return 0.0
+        
+        try:
+            vec1 = np.array(vec1)
+            vec2 = np.array(vec2)
+            
+            dot_product = np.dot(vec1, vec2)
+            norm_vec1 = np.linalg.norm(vec1)
+            norm_vec2 = np.linalg.norm(vec2)
+            
+            if norm_vec1 == 0 or norm_vec2 == 0:
+                return 0.0
+                
+            return dot_product / (norm_vec1 * norm_vec2)
+        except Exception as e:
+            print(f"Error in cosine similarity calculation: {str(e)}")
+            return 0.0
+    
+    def _calculate_fallback_score(self, job_info: Dict, candidate_info: Dict) -> Tuple[float, str]:
+        """Simple keyword matching algorithm as a fallback"""
+        job_requirements = set(job_info.get("requirements", []))
+        if not job_requirements and "required_skills" in job_info:
+            job_requirements = set(job_info.get("required_skills", []))
+            
+        candidate_skills = set(candidate_info.get("skills", []))
+        
+        # Calculate skill match percentage
+        if not job_requirements:
+            skill_match = 50.0  # Default if no requirements specified
+        else:
+            matched_skills = job_requirements.intersection(candidate_skills)
+            skill_match = (len(matched_skills) / len(job_requirements)) * 100
+        
+        # Add location match bonus
+        location_match = 0
+        if job_info.get("location") == candidate_info.get("location"):
+            location_match = 10
+        
+        # Create explanation
+        explanation = f"Keyword match: Found {len(job_requirements.intersection(candidate_skills))} matching skills out of {len(job_requirements)} required skills."
+        
+        # Simple score calculation (primarily based on matching skills)
+        score = min(100, skill_match + location_match)
+        
+        return score, explanation
+        
+    def get_job_candidate_matches(self, job_info: Dict, candidates: List[Dict]) -> List[Dict]:
+        """Match a job to multiple candidates and return sorted candidate recommendations"""
+        try:
+            matches = []
+            for candidate in candidates:
+                try:
+                    candidate_id = candidate.get("id") if "id" in candidate else str(candidate.get("_id", "unknown"))
+                    score, explanation = self.get_match_score(job_info, candidate)
+                    matches.append({
+                        "candidate_id": candidate_id,
+                        "match_score": score,
+                        "explanation": explanation
+                    })
+                except Exception as e:
+                    print(f"Error matching candidate {candidate.get('id', 'unknown')}: {str(e)}")
+                    matches.append({
+                        "candidate_id": candidate.get("id", "unknown"),
+                        "match_score": 0.0,
+                        "explanation": f"Error occurred during matching: {str(e)}"
+                    })
+            return sorted(matches, key=lambda x: x["match_score"], reverse=True)
+        except Exception as e:
+            print(f"Unexpected error in get_job_candidate_matches: {str(e)}")
+            return []
+    
+    def get_candidate_job_matches(self, candidate_info: Dict, jobs: List[Dict]) -> List[Dict]:
+        """Match a candidate to multiple jobs and return sorted job recommendations"""
+        try:
+            matches = []
+            for job in jobs:
+                try:
+                    job_id = job.get("id") if "id" in job else str(job.get("_id", "unknown"))
+                    score, explanation = self.get_match_score(job, candidate_info)
+                    matches.append({
+                        "job_id": job_id,
+                        "match_score": score,
+                        "explanation": explanation
+                    })
+                except Exception as e:
+                    print(f"Error matching job {job.get('id', 'unknown')}: {str(e)}")
+                    matches.append({
+                        "job_id": job.get("id", "unknown"),
+                        "match_score": 0.0,
+                        "explanation": f"Error occurred during matching: {str(e)}"
+                    })
+            return sorted(matches, key=lambda x: x["match_score"], reverse=True)
+        except Exception as e:
+            print(f"Unexpected error in get_candidate_job_matches: {str(e)}")
+            return []
 
 app = FastAPI(title="Job Recommender System")
 recommender = LlamaRecommender()
@@ -824,6 +983,39 @@ async def get_job_recommendations(current_user: dict = Depends(get_current_user)
     
     jobs = await Database.get_collection(JOBS_COLLECTION).find({"is_active": True}).to_list(length=None)
     recommendations = recommender.get_candidate_job_matches(candidate, jobs)
+    
+    # Save recommendations with score > 70 to recommendations collection
+    for rec in recommendations:
+        if rec["match_score"] >= 70:
+            # Create recommendation document
+            recommendation_doc = {
+                "id": str(ObjectId()),
+                "candidate_id": candidate["id"],
+                "job_id": rec["job_id"],
+                "match_score": rec["match_score"],
+                "type": "job_recommendation",
+                "timestamp": datetime.utcnow(),
+                "viewed": False
+            }
+            
+            # Check if this recommendation already exists
+            existing_rec = await Database.get_collection(RECOMMENDATIONS_COLLECTION).find_one({
+                "candidate_id": candidate["id"],
+                "job_id": rec["job_id"],
+                "type": "job_recommendation"
+            })
+            
+            # If it doesn't exist or score has changed, save/update it
+            if not existing_rec:
+                await Database.get_collection(RECOMMENDATIONS_COLLECTION).insert_one(recommendation_doc)
+                print(f"Saved job recommendation with score {rec['match_score']} for candidate {candidate['id']}")
+            elif existing_rec["match_score"] != rec["match_score"]:
+                await Database.get_collection(RECOMMENDATIONS_COLLECTION).update_one(
+                    {"id": existing_rec["id"]},
+                    {"$set": {"match_score": rec["match_score"], "timestamp": datetime.utcnow()}}
+                )
+                print(f"Updated job recommendation score to {rec['match_score']} for candidate {candidate['id']}")
+    
     return recommendations
 
 @app.get("/recommendations/candidates/{job_id}", response_model=List[dict])
@@ -847,6 +1039,39 @@ async def get_candidate_recommendations(job_id: str, current_user: dict = Depend
     
     recommendations = recommender.get_job_candidate_matches(job, candidates)
     
+    # Save high-scoring recommendations to the recommendations collection
+    for rec in recommendations:
+        if rec["match_score"] >= 70:
+            # Create recommendation document
+            recommendation_doc = {
+                "id": str(ObjectId()),
+                "candidate_id": rec["candidate_id"],
+                "job_id": job_id,
+                "employer_id": current_user["id"],
+                "match_score": rec["match_score"],
+                "type": "candidate_recommendation",
+                "timestamp": datetime.utcnow(),
+                "viewed": False
+            }
+            
+            # Check if this recommendation already exists
+            existing_rec = await Database.get_collection(RECOMMENDATIONS_COLLECTION).find_one({
+                "candidate_id": rec["candidate_id"],
+                "job_id": job_id,
+                "type": "candidate_recommendation"
+            })
+            
+            # If it doesn't exist or score has changed, save/update it
+            if not existing_rec:
+                await Database.get_collection(RECOMMENDATIONS_COLLECTION).insert_one(recommendation_doc)
+                print(f"Saved candidate recommendation with score {rec['match_score']} for job {job_id}")
+            elif existing_rec["match_score"] != rec["match_score"]:
+                await Database.get_collection(RECOMMENDATIONS_COLLECTION).update_one(
+                    {"id": existing_rec["id"]},
+                    {"$set": {"match_score": rec["match_score"], "timestamp": datetime.utcnow()}}
+                )
+                print(f"Updated candidate recommendation score to {rec['match_score']} for job {job_id}")
+    
     # Fetch full candidate details for each recommendation
     detailed_recommendations = []
     for rec in recommendations:
@@ -861,6 +1086,175 @@ async def get_candidate_recommendations(job_id: str, current_user: dict = Depend
             detailed_recommendations.append(rec_with_details)
     
     return detailed_recommendations
+
+# Add this function after the existing recommendation functions
+@app.get("/recommendations/projects", response_model=List[dict])
+async def get_project_recommendations(current_user: dict = Depends(get_current_user)):
+    """Get project recommendations for a candidate"""
+    if current_user["user_type"] != UserType.CANDIDATE:
+        raise HTTPException(status_code=403, detail="Only candidates can get project recommendations")
+    
+    # Get candidate profile
+    candidate = await Database.get_collection(CANDIDATES_COLLECTION).find_one(
+        {"email": current_user["email"]}
+    )
+    if not candidate:
+        raise HTTPException(status_code=404, detail="Candidate profile not found")
+    
+    # Get active projects
+    projects = await Database.get_collection(PROJECTS_COLLECTION).find({"is_active": True, "status": "open"}).to_list(length=None)
+    
+    if not projects:
+        return []
+    
+    recommendations = []
+    # Process each project to find matches
+    for project in projects:
+        # Convert project format to job-like format for the recommender
+        project_job_format = {
+            "title": project.get("title", ""),
+            "required_skills": project.get("skills_required", []),  # Map project skills to required_skills
+            "description": project.get("description", ""),
+        }
+        
+        # Use the same matching algorithm used for jobs
+        score, explanation = recommender.get_match_score(project_job_format, candidate)
+        
+        # Add to recommendations
+        project_recommendation = {
+            "project_id": project["id"],
+            "match_score": score,
+            "explanation": explanation,
+            "project_details": {
+                "title": project.get("title", ""),
+                "company": project.get("company", ""),
+                "description": project.get("description", ""),
+                "project_type": project.get("project_type", ""),
+                "skills_required": project.get("skills_required", []),
+            }
+        }
+        recommendations.append(project_recommendation)
+        
+        # Save recommendations with score > 70 to recommendations collection
+        if score >= 70:
+            # Create recommendation document
+            recommendation_doc = {
+                "id": str(ObjectId()),
+                "candidate_id": candidate["id"],
+                "project_id": project["id"],
+                "match_score": score,
+                "type": "project_recommendation",
+                "timestamp": datetime.utcnow(),
+                "viewed": False
+            }
+            
+            # Check if this recommendation already exists
+            existing_rec = await Database.get_collection(RECOMMENDATIONS_COLLECTION).find_one({
+                "candidate_id": candidate["id"],
+                "project_id": project["id"],
+                "type": "project_recommendation"
+            })
+            
+            # If it doesn't exist or score has changed, save/update it
+            if not existing_rec:
+                await Database.get_collection(RECOMMENDATIONS_COLLECTION).insert_one(recommendation_doc)
+                print(f"Saved project recommendation with score {score} for candidate {candidate['id']}")
+            elif existing_rec["match_score"] != score:
+                await Database.get_collection(RECOMMENDATIONS_COLLECTION).update_one(
+                    {"id": existing_rec["id"]},
+                    {"$set": {"match_score": score, "timestamp": datetime.utcnow()}}
+                )
+                print(f"Updated project recommendation score to {score} for candidate {candidate['id']}")
+    
+    # Sort by match score
+    recommendations = sorted(recommendations, key=lambda x: x["match_score"], reverse=True)
+    return recommendations
+
+@app.get("/recommendations/candidates-for-project/{project_id}", response_model=List[dict])
+async def get_candidate_recommendations_for_project(project_id: str, current_user: dict = Depends(get_current_user)):
+    """Get candidate recommendations for a specific project"""
+    if current_user["user_type"] != UserType.EMPLOYER:
+        raise HTTPException(status_code=403, detail="Only employers can get candidate recommendations for projects")
+    
+    project = await Database.get_collection(PROJECTS_COLLECTION).find_one({"id": project_id})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    # Verify the project belongs to this employer
+    if project["employer_id"] != current_user["id"]:
+        raise HTTPException(status_code=403, detail="You can only get recommendations for your own projects")
+    
+    # Get active candidates with complete profiles
+    candidates = await Database.get_collection(CANDIDATES_COLLECTION).find({
+        "is_active": True,
+        "profile_completed": True
+    }).to_list(length=None)
+    
+    if not candidates:
+        return []
+    
+    recommendations = []
+    for candidate in candidates:
+        # Convert project format to job-like format for the recommender
+        project_job_format = {
+            "title": project.get("title", ""),
+            "required_skills": project.get("skills_required", []),
+            "description": project.get("description", ""),
+        }
+        
+        # Use the same matching algorithm
+        score, explanation = recommender.get_match_score(project_job_format, candidate)
+        
+        candidate_id = candidate.get("id")
+        recommendation = {
+            "candidate_id": candidate_id,
+            "match_score": score,
+            "explanation": explanation,
+            "candidate": {
+                "full_name": candidate.get("full_name", ""),
+                "skills": candidate.get("skills", []),
+                "location": candidate.get("location", ""),
+                "experience": candidate.get("experience", "")
+            }
+        }
+        
+        recommendations.append(recommendation)
+        
+        # Save recommendations with score > 70 to recommendations collection
+        if score >= 70:
+            # Create recommendation document
+            recommendation_doc = {
+                "id": str(ObjectId()),
+                "candidate_id": candidate_id,
+                "project_id": project_id,
+                "employer_id": current_user["id"],
+                "match_score": score,
+                "type": "project_candidate_recommendation",
+                "timestamp": datetime.utcnow(),
+                "viewed": False
+            }
+            
+            # Check if this recommendation already exists
+            existing_rec = await Database.get_collection(RECOMMENDATIONS_COLLECTION).find_one({
+                "candidate_id": candidate_id,
+                "project_id": project_id,
+                "type": "project_candidate_recommendation"
+            })
+            
+            # If it doesn't exist or score has changed, save/update it
+            if not existing_rec:
+                await Database.get_collection(RECOMMENDATIONS_COLLECTION).insert_one(recommendation_doc)
+                print(f"Saved candidate recommendation for project with score {score}")
+            elif existing_rec["match_score"] != score:
+                await Database.get_collection(RECOMMENDATIONS_COLLECTION).update_one(
+                    {"id": existing_rec["id"]},
+                    {"$set": {"match_score": score, "timestamp": datetime.utcnow()}}
+                )
+                print(f"Updated candidate recommendation for project with score {score}")
+    
+    # Sort by match score
+    recommendations = sorted(recommendations, key=lambda x: x["match_score"], reverse=True)
+    return recommendations
 
 # User profile endpoints
 @app.put("/profile", response_model=User)
@@ -1355,12 +1749,16 @@ def create_candidate_embedding(candidate_data: Dict[str, Any]) -> List[float]:
 # Add a semantic search endpoint
 @app.post("/jobs/search", response_model=List[Job])
 async def search_jobs_semantic(
-    query: str, 
+    search_data: dict,
     top_k: int = 5,
     current_user: dict = Depends(get_current_user)
 ):
     """Search for jobs using semantic search"""
     try:
+        query = search_data.get("query", "")
+        if not query:
+            raise HTTPException(status_code=400, detail="Query parameter is required")
+            
         query_vector = get_embedding(query)
         
         try:
@@ -1442,12 +1840,16 @@ async def search_jobs_semantic(
 
 @app.post("/projects/search", response_model=List[Project])
 async def search_projects_semantic(
-    query: str, 
+    search_data: dict,
     top_k: int = 5,
     current_user: dict = Depends(get_current_user)
 ):
     """Search for projects using semantic search"""
     try:
+        query = search_data.get("query", "")
+        if not query:
+            raise HTTPException(status_code=400, detail="Query parameter is required")
+            
         query_vector = get_embedding(query)
         
         try:
@@ -1534,7 +1936,7 @@ async def search_projects_semantic(
 
 @app.post("/candidates/search", response_model=List[Candidate])
 async def search_candidates_semantic(
-    query: str, 
+    search_data: dict,
     top_k: int = 5,
     current_user: dict = Depends(get_current_user)
 ):
@@ -1543,6 +1945,10 @@ async def search_candidates_semantic(
         # Only employers can search for candidates
         if current_user["user_type"] != UserType.EMPLOYER:
             raise HTTPException(status_code=403, detail="Only employers can search candidates")
+        
+        query = search_data.get("query", "")
+        if not query:
+            raise HTTPException(status_code=400, detail="Query parameter is required")
             
         query_vector = get_embedding(query)
         
@@ -1631,7 +2037,129 @@ async def search_candidates_semantic(
         print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Failed to perform semantic search on candidates: {str(e)}")
 
+@app.get("/recommendations/stored", response_model=List[dict])
+async def get_stored_recommendations(current_user: dict = Depends(get_current_user)):
+    """Get all stored recommendations for the current user"""
+    try:
+        if current_user["user_type"] == UserType.CANDIDATE:
+            # For candidates, get job and project recommendations
+            recommendations = await Database.get_collection(RECOMMENDATIONS_COLLECTION).find({
+                "candidate_id": current_user["id"],
+                "type": {"$in": ["job_recommendation", "project_recommendation"]}
+            }).to_list(length=None)
+            
+            # Enrich recommendations with details
+            for rec in recommendations:
+                rec.pop("_id", None)
+                
+                if rec["type"] == "job_recommendation" and "job_id" in rec:
+                    job = await Database.get_collection(JOBS_COLLECTION).find_one({"id": rec["job_id"]})
+                    if job:
+                        rec["job_details"] = {
+                            "title": job.get("title", ""),
+                            "company": job.get("company", ""),
+                            "location": job.get("location", ""),
+                            "is_active": job.get("is_active", True)
+                        }
+                
+                elif rec["type"] == "project_recommendation" and "project_id" in rec:
+                    project = await Database.get_collection(PROJECTS_COLLECTION).find_one({"id": rec["project_id"]})
+                    if project:
+                        rec["project_details"] = {
+                            "title": project.get("title", ""),
+                            "company": project.get("company", ""),
+                            "status": project.get("status", ""),
+                            "project_type": project.get("project_type", ""),
+                            "is_active": project.get("is_active", True)
+                        }
+            
+        elif current_user["user_type"] == UserType.EMPLOYER:
+            # For employers, get candidate recommendations for their jobs and projects
+            recommendations = await Database.get_collection(RECOMMENDATIONS_COLLECTION).find({
+                "employer_id": current_user["id"],
+                "type": {"$in": ["candidate_recommendation", "project_candidate_recommendation"]}
+            }).to_list(length=None)
+            
+            # Enrich recommendations with details
+            for rec in recommendations:
+                rec.pop("_id", None)
+                
+                if "candidate_id" in rec:
+                    candidate = await Database.get_collection(CANDIDATES_COLLECTION).find_one({"id": rec["candidate_id"]})
+                    if candidate:
+                        rec["candidate_details"] = {
+                            "full_name": candidate.get("full_name", ""),
+                            "skills": candidate.get("skills", []),
+                            "location": candidate.get("location", ""),
+                            "experience": candidate.get("experience", "")
+                        }
+                
+                if rec["type"] == "candidate_recommendation" and "job_id" in rec:
+                    job = await Database.get_collection(JOBS_COLLECTION).find_one({"id": rec["job_id"]})
+                    if job:
+                        rec["job_details"] = {
+                            "title": job.get("title", "")
+                        }
+                
+                elif rec["type"] == "project_candidate_recommendation" and "project_id" in rec:
+                    project = await Database.get_collection(PROJECTS_COLLECTION).find_one({"id": rec["project_id"]})
+                    if project:
+                        rec["project_details"] = {
+                            "title": project.get("title", "")
+                        }
+        
+        else:
+            return []
+        
+        # Sort by match score
+        recommendations = sorted(recommendations, key=lambda x: x.get("match_score", 0), reverse=True)
+        return recommendations
+        
+    except Exception as e:
+        print(f"Error getting stored recommendations: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve recommendations: {str(e)}")
+
+@app.patch("/recommendations/{recommendation_id}/viewed")
+async def mark_recommendation_as_viewed(
+    recommendation_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Mark a recommendation as viewed"""
+    try:
+        # Find the recommendation
+        recommendation = await Database.get_collection(RECOMMENDATIONS_COLLECTION).find_one({"id": recommendation_id})
+        if not recommendation:
+            raise HTTPException(status_code=404, detail="Recommendation not found")
+        
+        # Verify ownership based on user type
+        if current_user["user_type"] == UserType.CANDIDATE:
+            if recommendation.get("candidate_id") != current_user["id"]:
+                raise HTTPException(status_code=403, detail="You can only mark your own recommendations as viewed")
+        elif current_user["user_type"] == UserType.EMPLOYER:
+            if recommendation.get("employer_id") != current_user["id"]:
+                raise HTTPException(status_code=403, detail="You can only mark your own recommendations as viewed")
+        else:
+            raise HTTPException(status_code=403, detail="Unauthorized")
+        
+        # Update the recommendation
+        result = await Database.get_collection(RECOMMENDATIONS_COLLECTION).update_one(
+            {"id": recommendation_id},
+            {"$set": {"viewed": True, "viewed_at": datetime.utcnow()}}
+        )
+        
+        if result.modified_count == 0:
+            raise HTTPException(status_code=500, detail="Failed to mark recommendation as viewed")
+        
+        return {"message": "Recommendation marked as viewed"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error marking recommendation as viewed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000) 
-    #uvicorn.run(app, host="0.0.0.0", port=8000) 
+    uvicorn.run(app, host="0.0.0.0", port=8000)
